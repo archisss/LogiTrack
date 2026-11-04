@@ -1,0 +1,6 @@
+{
+  "name": "LogiTrack MVP - Gestión de Órdenes y Manifiestos",
+  "description": "Sistema de gestión de recolecciones, control de proveedores, cálculo de costos y utilidad con Decimal, manifiestos versionados y semáforo operativo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
