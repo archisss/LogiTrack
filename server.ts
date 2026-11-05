@@ -14,6 +14,7 @@ import type {
   CatalogConcept,
   ManifestDocument,
   HistoryEntry,
+  ServiceLocation,
 } from './src/types.ts';
 import {
   calculateOrderTotals,
@@ -38,6 +39,11 @@ import {
   dbCreateCatalogConcept,
   dbUpdateCatalogConcept,
   dbDeleteCatalogConcept,
+  dbGetServiceLocations,
+  dbGetServiceLocationById,
+  dbCreateServiceLocation,
+  dbUpdateServiceLocation,
+  dbDeleteServiceLocation,
   dbGetOrders,
   dbGetOrderById,
   dbCreateOrder,
@@ -163,6 +169,88 @@ const SEED_CATALOG_CONCEPTS: CatalogConcept[] = [
   { id: 'cat-7', item: '', unidad: 'ST', descripcion: 'Flete Llantas 51 a 100', precioUnitario: 13500.0 },
   { id: 'cat-8', item: '', unidad: 'TAMBO', descripcion: 'Tambos de Aceite Usado (200L)', precioUnitario: 950.0 },
   { id: 'cat-9', item: '', unidad: 'ST', descripcion: 'Certificado de Disposición Final', precioUnitario: 800.0 },
+];
+
+// Initial benchmark seed service locations (CEDIs para servicios)
+const SEED_SERVICE_LOCATIONS: ServiceLocation[] = [
+  {
+    id: 'cedi-1',
+    division: 'Centro',
+    cedi: 'TLALPIZAHUAC',
+    direccion: {
+      calleNumero: 'Av. Cuauhtémoc 45',
+      colonia: 'Tlalpizahuac',
+      ciudad: 'Ixtapaluca',
+      estado: 'Estado de México',
+      codigoPostal: '56560',
+    },
+    activo: true,
+  },
+  {
+    id: 'cedi-2',
+    division: 'Oriente',
+    cedi: 'AMECA-MECA',
+    direccion: {
+      calleNumero: 'Carretera México-Cuautla Km 58',
+      colonia: 'San Juan',
+      ciudad: 'Amecameca',
+      estado: 'Estado de México',
+      codigoPostal: '56900',
+    },
+    activo: true,
+  },
+  {
+    id: 'cedi-3',
+    division: 'Centro',
+    cedi: 'TLALNEPANTLA',
+    direccion: {
+      calleNumero: 'Av. de la Independencia 125',
+      colonia: 'Parque Industrial Poniente',
+      ciudad: 'Tlalnepantla',
+      estado: 'Estado de México',
+      codigoPostal: '54030',
+    },
+    activo: true,
+  },
+  {
+    id: 'cedi-4',
+    division: 'Sur',
+    cedi: 'PUEBLA SUR',
+    direccion: {
+      calleNumero: 'Av. 16 de Septiembre 4500',
+      colonia: 'El Carmen',
+      ciudad: 'Puebla',
+      estado: 'Puebla',
+      codigoPostal: '72530',
+    },
+    activo: true,
+  },
+  {
+    id: 'cedi-5',
+    division: 'Occidente',
+    cedi: 'GUADALAJARA',
+    direccion: {
+      calleNumero: 'Calzada González Gallo 1890',
+      colonia: 'Atlas',
+      ciudad: 'Guadalajara',
+      estado: 'Jalisco',
+      codigoPostal: '44870',
+    },
+    activo: true,
+  },
+  {
+    id: 'cedi-6',
+    division: 'Norte',
+    cedi: 'MONTERREY NORTE',
+    direccion: {
+      calleNumero: 'Av. Gonzalitos 840',
+      colonia: 'Mitras Centro',
+      ciudad: 'Monterrey',
+      estado: 'Nuevo León',
+      codigoPostal: '64020',
+    },
+    activo: true,
+  },
 ];
 
 // Helper to create date relative to now in ISO
@@ -762,6 +850,7 @@ async function startServer() {
       providers: SEED_PROVIDERS,
       clients: SEED_CLIENTS,
       catalogConcepts: SEED_CATALOG_CONCEPTS,
+      serviceLocations: SEED_SERVICE_LOCATIONS,
       orders: getInitialSeedOrders(),
     });
   } catch (dbErr) {
@@ -791,16 +880,17 @@ async function startServer() {
     });
   });
 
-  // Providers, Clients & Catalog concepts
+  // Providers, Clients, Catalog concepts & Service Locations (CEDIs)
   app.get('/api/config', async (req: Request, res: Response) => {
     try {
-      const [providers, clients, catalogConcepts, dbStatus] = await Promise.all([
+      const [providers, clients, catalogConcepts, serviceLocations, dbStatus] = await Promise.all([
         dbGetProviders(),
         dbGetClients(),
         dbGetCatalogConcepts(),
+        dbGetServiceLocations(),
         getDbStatus(),
       ]);
-      res.json({ providers, clients, catalogConcepts, database: dbStatus });
+      res.json({ providers, clients, catalogConcepts, serviceLocations, database: dbStatus });
     } catch (err: any) {
       res.status(500).json({ error: 'Error al obtener configuración', details: err.message });
     }
@@ -1027,6 +1117,121 @@ async function startServer() {
     }
   });
 
+  // --- CRUD UBICACIONES PARA SERVICIO (CEDIs) ---
+  app.get('/api/service-locations', async (req: Request, res: Response) => {
+    try {
+      const locations = await dbGetServiceLocations();
+      res.json(locations);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al obtener ubicaciones de servicio', details: err.message });
+    }
+  });
+
+  app.post('/api/service-locations', async (req: Request, res: Response) => {
+    try {
+      const { division, cedi, direccion, activo } = req.body;
+      if (!division || String(division).trim().length === 0) {
+        return res.status(400).json({ error: 'La división (ej. Centro, Sur, Norte) es obligatoria' });
+      }
+      if (!cedi || String(cedi).trim().length === 0) {
+        return res.status(400).json({ error: 'El nombre o código del CEDI es obligatorio' });
+      }
+      if (!direccion || typeof direccion !== 'object') {
+        return res.status(400).json({ error: 'La dirección del CEDI es obligatoria' });
+      }
+      if (!direccion.calleNumero || String(direccion.calleNumero).trim().length === 0) {
+        return res.status(400).json({ error: 'La calle y número son obligatorios' });
+      }
+      if (!direccion.ciudad || String(direccion.ciudad).trim().length === 0) {
+        return res.status(400).json({ error: 'La ciudad o municipio es obligatorio' });
+      }
+      if (!direccion.estado || String(direccion.estado).trim().length === 0) {
+        return res.status(400).json({ error: 'El estado / entidad federativa es obligatorio' });
+      }
+      if (!direccion.codigoPostal || String(direccion.codigoPostal).trim().length === 0) {
+        return res.status(400).json({ error: 'El código postal es obligatorio' });
+      }
+
+      const newLocation: ServiceLocation = {
+        id: `cedi-${Date.now()}`,
+        division: String(division).trim(),
+        cedi: String(cedi).trim().toUpperCase(),
+        direccion: {
+          calleNumero: String(direccion.calleNumero).trim(),
+          colonia: direccion.colonia ? String(direccion.colonia).trim() : undefined,
+          ciudad: String(direccion.ciudad).trim(),
+          estado: String(direccion.estado).trim(),
+          codigoPostal: String(direccion.codigoPostal).trim(),
+        },
+        activo: activo !== undefined ? Boolean(activo) : true,
+      };
+
+      const created = await dbCreateServiceLocation(newLocation);
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al registrar ubicación de servicio', details: err.message });
+    }
+  });
+
+  app.put('/api/service-locations/:id', async (req: Request, res: Response) => {
+    try {
+      const location = await dbGetServiceLocationById(req.params.id);
+      if (!location) {
+        return res.status(404).json({ error: 'Ubicación / CEDI no encontrado' });
+      }
+
+      const { division, cedi, direccion, activo } = req.body;
+      const updates: Partial<ServiceLocation> = {};
+
+      if (division !== undefined) {
+        if (!division || String(division).trim().length === 0) {
+          return res.status(400).json({ error: 'La división no puede estar vacía' });
+        }
+        updates.division = String(division).trim();
+      }
+
+      if (cedi !== undefined) {
+        if (!cedi || String(cedi).trim().length === 0) {
+          return res.status(400).json({ error: 'El CEDI no puede estar vacío' });
+        }
+        updates.cedi = String(cedi).trim().toUpperCase();
+      }
+
+      if (direccion !== undefined && typeof direccion === 'object') {
+        updates.direccion = {
+          ...location.direccion,
+          calleNumero: direccion.calleNumero !== undefined ? String(direccion.calleNumero).trim() : location.direccion.calleNumero,
+          colonia: direccion.colonia !== undefined ? String(direccion.colonia).trim() : location.direccion.colonia,
+          ciudad: direccion.ciudad !== undefined ? String(direccion.ciudad).trim() : location.direccion.ciudad,
+          estado: direccion.estado !== undefined ? String(direccion.estado).trim() : location.direccion.estado,
+          codigoPostal: direccion.codigoPostal !== undefined ? String(direccion.codigoPostal).trim() : location.direccion.codigoPostal,
+        };
+      }
+
+      if (activo !== undefined) {
+        updates.activo = Boolean(activo);
+      }
+
+      const updated = await dbUpdateServiceLocation(req.params.id, updates);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al actualizar ubicación de servicio', details: err.message });
+    }
+  });
+
+  app.delete('/api/service-locations/:id', async (req: Request, res: Response) => {
+    try {
+      const location = await dbGetServiceLocationById(req.params.id);
+      if (!location) {
+        return res.status(404).json({ error: 'Ubicación / CEDI no encontrado' });
+      }
+      await dbDeleteServiceLocation(req.params.id);
+      res.json({ message: 'Ubicación / CEDI eliminado exitosamente', deleted: location });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al eliminar ubicación de servicio', details: err.message });
+    }
+  });
+
   // Get orders (sanitized by role)
   app.get('/api/orders', async (req: Request, res: Response) => {
     try {
@@ -1067,7 +1272,7 @@ async function startServer() {
   // Create order (Admin only)
   app.post('/api/orders', async (req: Request, res: Response) => {
     try {
-      const { clienteId, conceptos, proveedorId, costoProveedor, user, numeroPedido } = req.body;
+      const { clienteId, conceptos, proveedorId, costoProveedor, user, numeroPedido, ubicacionServicio } = req.body;
 
       if (!numeroPedido || String(numeroPedido).trim().length === 0) {
         return res.status(400).json({ error: 'El Número de Pedido es obligatorio' });
@@ -1156,6 +1361,7 @@ async function startServer() {
         proveedorId: assignedProv ? assignedProv.id : null,
         proveedorNombre: assignedProv ? assignedProv.nombre : null,
         fechaOrden: nowIso,
+        ubicacionServicio: ubicacionServicio || undefined,
         conceptos: sanitizedConceptos,
         subtotalCliente: totals.subtotalCliente,
         costoTotalCliente: totals.costoTotalCliente,
@@ -1719,6 +1925,7 @@ async function startServer() {
         providers: SEED_PROVIDERS,
         clients: SEED_CLIENTS,
         catalogConcepts: SEED_CATALOG_CONCEPTS,
+        serviceLocations: SEED_SERVICE_LOCATIONS,
         orders: getInitialSeedOrders(),
       });
       res.json({ message: 'Datos reiniciados con éxito en PostgreSQL', totalOrders: 6 });

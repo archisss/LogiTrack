@@ -16,6 +16,7 @@ import {
   ArrowRight,
   ShieldAlert,
   Info,
+  MapPin,
 } from 'lucide-react';
 import type { Order, Provider, Client, Role, OrderStatus } from '../types.ts';
 import { calculateSla, canFinalizeOrder } from '../domain/rules.ts';
@@ -470,6 +471,43 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     </table>
                   </div>
                 </div>
+
+                {/* Ubicación para el Servicio (CEDI / División) asignado */}
+                {order.ubicacionServicio && (
+                  <div className="bg-purple-50/80 rounded-2xl p-4 border border-purple-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 bg-purple-100 text-purple-700 rounded-xl mt-0.5">
+                        <MapPin className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                            Ubicación para el servicio: CEDI {order.ubicacionServicio.cedi}
+                          </span>
+                          <span className="text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full border border-purple-200">
+                            División: {order.ubicacionServicio.division}
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 bg-white text-slate-600 rounded border border-purple-200">
+                            C.P. {order.ubicacionServicio.direccion.codigoPostal}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-slate-700 mt-1">
+                          <span className="font-semibold">
+                            {order.ubicacionServicio.direccion.calleNumero}
+                            {order.ubicacionServicio.direccion.colonia
+                              ? `, Col. ${order.ubicacionServicio.direccion.colonia}`
+                              : ''}
+                          </span>
+                          <span className="mx-1.5 text-slate-400">&bull;</span>
+                          <span>
+                            {order.ubicacionServicio.direccion.ciudad}, {order.ubicacionServicio.direccion.estado}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Sección renombrada exactamente a "Detalles de la orden" (antes Condiciones Obligatorias para Estado FINALIZADO) */}
                 <div className="bg-white rounded-2xl p-5 border border-slate-200 space-y-3">

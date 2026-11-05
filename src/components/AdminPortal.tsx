@@ -12,8 +12,9 @@ import {
   Building2,
   Truck,
   ExternalLink,
+  MapPin,
 } from 'lucide-react';
-import type { Order, Provider, Client, OrderStatus, SlaColor } from '../types.ts';
+import type { Order, Provider, Client, OrderStatus, SlaColor, ServiceLocation } from '../types.ts';
 import { calculateSla } from '../domain/rules.ts';
 import { StatusBadge, ManifestBadge, SlaBadge } from './StatusBadge.tsx';
 
@@ -21,22 +22,26 @@ interface AdminPortalProps {
   orders: Order[];
   providers: Provider[];
   clients: Client[];
+  serviceLocations?: ServiceLocation[];
   onOpenNewOrder: () => void;
   onSelectOrder: (order: Order) => void;
   onOpenAcceptanceTests: () => void;
   onOpenProviderCrud: () => void;
   onOpenConceptCatalog: () => void;
+  onOpenServiceLocations: () => void;
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({
   orders,
   providers,
   clients,
+  serviceLocations = [],
   onOpenNewOrder,
   onSelectOrder,
   onOpenAcceptanceTests,
   onOpenProviderCrud,
   onOpenConceptCatalog,
+  onOpenServiceLocations,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('TODOS');
@@ -98,7 +103,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         o.clienteNombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (o.proveedorNombre && o.proveedorNombre.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (o.numeroRecepcion && o.numeroRecepcion.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (o.numeroFacturacion && o.numeroFacturacion.toLowerCase().includes(searchTerm.toLowerCase()));
+        (o.numeroFacturacion && o.numeroFacturacion.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (o.ubicacionServicio && (
+          o.ubicacionServicio.cedi.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          o.ubicacionServicio.division.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          o.ubicacionServicio.direccion.ciudad.toLowerCase().includes(searchTerm.toLowerCase())
+        ));
 
       const matchesStatus = statusFilter === 'TODOS' || o.estado === statusFilter;
       const matchesProvider = providerFilter === 'TODOS' || o.proveedorId === providerFilter;
@@ -131,6 +141,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           >
             <Truck className="h-4 w-4 text-blue-600" />
             Transportistas ({providers.length})
+          </button>
+
+          <button
+            onClick={onOpenServiceLocations}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-purple-200 bg-purple-50/50 hover:bg-purple-100/60 text-purple-900 transition shadow-xs"
+            title="Catálogo de Ubicaciones para Servicios (CEDIs y Divisiones)"
+          >
+            <MapPin className="h-4 w-4 text-purple-600" />
+            Ubicaciones / CEDIs ({serviceLocations.length})
           </button>
 
           <button
@@ -321,6 +340,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         <div className="text-[11px] text-slate-500 font-medium truncate max-w-[170px]">
                           {o.clienteNombre}
                         </div>
+                        {o.ubicacionServicio && (
+                          <div className="text-[10px] text-purple-700 font-bold flex items-center gap-1 mt-0.5">
+                            <MapPin className="h-3 w-3 shrink-0 text-purple-500" />
+                            <span className="truncate max-w-[170px]">
+                              {o.ubicacionServicio.cedi} &bull; {o.ubicacionServicio.division}
+                            </span>
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-4">

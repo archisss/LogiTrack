@@ -15,15 +15,17 @@ import {
   ShieldCheck,
   CheckCircle2,
 } from 'lucide-react';
-import type { Client, Provider, ItemConcept, CatalogConcept } from '../types.ts';
+import type { Client, Provider, ItemConcept, CatalogConcept, ServiceLocation } from '../types.ts';
 import { calculateOrderTotals, calculateItemImporte } from '../domain/rules.ts';
 import { ProviderSelectModal } from './ProviderSelectModal.tsx';
+import { ServiceLocationSelectModal } from './ServiceLocationSelectModal.tsx';
 
 interface NewOrderModalProps {
   isOpen: boolean;
   onClose: () => void;
   clients: Client[];
   providers: Provider[];
+  serviceLocations: ServiceLocation[];
   catalogConcepts: CatalogConcept[];
   onOpenCatalogManager: () => void;
   onOrderCreated: () => void;
@@ -46,6 +48,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   onClose,
   clients,
   providers,
+  serviceLocations,
   catalogConcepts,
   onOpenCatalogManager,
   onOrderCreated,
@@ -55,6 +58,10 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [clienteId, setClienteId] = useState<string>('');
   const [proveedorId, setProveedorId] = useState<string | null>(null);
   const [costoProveedor, setCostoProveedor] = useState<string>('');
+
+  // Ubicación para el servicio (CEDI y división)
+  const [selectedLocation, setSelectedLocation] = useState<ServiceLocation | null>(null);
+  const [isLocationSelectOpen, setIsLocationSelectOpen] = useState<boolean>(false);
 
   // Requisito 2: Lista de conceptos tipo tabla como en la captura
   const [conceptos, setConceptos] = useState<FormConcept[]>([]);
@@ -82,6 +89,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       setClienteId(clients[0]?.id || '');
       setProveedorId(null);
       setCostoProveedor('');
+      setSelectedLocation(null);
+      setIsLocationSelectOpen(false);
       setConceptos([]);
       resetConceptInputs();
       setGeneralError(null);
@@ -228,6 +237,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const payload = {
         numeroPedido: numeroPedido.trim(),
         clienteId,
+        ubicacionServicio: selectedLocation || undefined,
         proveedorId: proveedorId || null,
         costoProveedor: proveedorId ? Number(costoProveedor) : null,
         conceptos: conceptsWithImporte,
@@ -325,7 +335,98 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               </div>
             </div>
 
-            {/* SECCIÓN 2: FORMULARIO PARA AGREGAR NUEVO CONCEPTO */}
+            {/* SECCIÓN 2: UBICACIÓN PARA EL SERVICIO (CEDI / DIVISIÓN) */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 bg-purple-100 text-purple-700 rounded-lg">
+                    <MapPin className="h-3.5 w-3.5" />
+                  </span>
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      Ubicación para el servicio
+                    </span>
+                    <span className="ml-2 text-[10px] text-purple-700 font-semibold bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                      CEDI y División
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsLocationSelectOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-xs transition"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                  Buscar en Catálogo de Ubicaciones / CEDI...
+                </button>
+              </div>
+
+              {selectedLocation ? (
+                <div className="bg-white p-3.5 rounded-xl border border-purple-200 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold shrink-0 mt-0.5">
+                      <MapPin className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900 tracking-wide uppercase">
+                          CEDI: {selectedLocation.cedi}
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">
+                          División: {selectedLocation.division}
+                        </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
+                          C.P. {selectedLocation.direccion.codigoPostal}
+                        </span>
+                      </div>
+
+                      <div className="text-[11px] text-slate-600 mt-1 flex items-center gap-1">
+                        <span className="font-medium text-slate-800">
+                          {selectedLocation.direccion.calleNumero}
+                          {selectedLocation.direccion.colonia ? `, Col. ${selectedLocation.direccion.colonia}` : ''}
+                        </span>
+                        <span>&bull;</span>
+                        <span>
+                          {selectedLocation.direccion.ciudad}, {selectedLocation.direccion.estado}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsLocationSelectOpen(true)}
+                      className="px-2.5 py-1 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition"
+                    >
+                      Cambiar CEDI
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLocation(null)}
+                      className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition"
+                      title="Quitar ubicación"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white p-3 rounded-xl border border-dashed border-slate-300 flex items-center justify-between text-xs text-slate-500">
+                  <span>Ninguna ubicación o CEDI seleccionado para este servicio. Puede asignarlo desde el catálogo.</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsLocationSelectOpen(true)}
+                    className="text-purple-600 hover:text-purple-800 font-bold"
+                  >
+                    Abrir buscador de CEDIs &rarr;
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* SECCIÓN 3: FORMULARIO PARA AGREGAR NUEVO CONCEPTO */}
             <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200 space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
@@ -839,6 +940,15 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
           setProveedorId(selectedId);
           setCostoProveedor(costo);
         }}
+      />
+
+      {/* Modal de Búsqueda y Selección de Ubicación para el Servicio */}
+      <ServiceLocationSelectModal
+        isOpen={isLocationSelectOpen}
+        onClose={() => setIsLocationSelectOpen(false)}
+        serviceLocations={serviceLocations}
+        selectedLocationId={selectedLocation?.id}
+        onSelect={(loc) => setSelectedLocation(loc)}
       />
     </>
   );

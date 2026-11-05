@@ -10,6 +10,24 @@ export type OrderStatus =
 
 export type ManifestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
+export interface ServiceLocationAddress {
+  calleNumero: string; // Calle y número [Nombre de la vía] [Número] * (ej: Av. de la Independencia 125)
+  colonia?: string; // Colonia o Barrio (Opcional) (ej: Parque Industrial Poniente)
+  ciudad: string; // Ciudad o Municipio * (ej: Tlalnepantla)
+  estado: string; // Estado / Entidad * (ej: Estado de México)
+  codigoPostal: string; // Código Postal (C.P.) * (ej: 54030)
+}
+
+export interface ServiceLocation {
+  id: string;
+  division: string; // Sur, Norte, Centro, Bajío, Occidente, etc.
+  cedi: string; // TLALPIZAHUAC, AMECA-MECA, TLALNEPANTLA, etc.
+  direccion: ServiceLocationAddress;
+  activo: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface CatalogConcept {
   id: string;
   item?: string; // Campo opcional
@@ -98,6 +116,7 @@ export interface Order {
   proveedorId: string | null;
   proveedorNombre: string | null;
   fechaOrden: string; // ISO
+  ubicacionServicio?: ServiceLocation; // Ubicación para el servicio / CEDI
   conceptos: ItemConcept[];
   
   // Costos e importes

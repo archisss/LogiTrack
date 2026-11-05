@@ -1,5 +1,5 @@
 import pg from 'pg';
-import type { Provider, Client, CatalogConcept, Order, OrderStatus } from '../types.ts';
+import type { Provider, Client, CatalogConcept, Order, OrderStatus, ServiceLocation } from '../types.ts';
 
 const { Pool } = pg;
 
@@ -51,6 +51,7 @@ export async function initDatabase(initialSeed: {
   providers: Provider[];
   clients: Client[];
   catalogConcepts: CatalogConcept[];
+  serviceLocations: ServiceLocation[];
   orders: Order[];
 }): Promise<void> {
   console.log('[DB] Inicializando tablas en PostgreSQL...');
@@ -98,7 +99,20 @@ export async function initDatabase(initialSeed: {
       );
     `);
 
-    // 4. Orders table
+    // 4. Service locations (CEDIs) table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS service_locations (
+        id VARCHAR(100) PRIMARY KEY,
+        division VARCHAR(100) NOT NULL,
+        cedi VARCHAR(150) NOT NULL,
+        direccion JSONB NOT NULL,
+        activo BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    // 5. Orders table
     await client.query(`
       CREATE TABLE IF NOT EXISTS orders (
         id VARCHAR(100) PRIMARY KEY,
@@ -109,6 +123,7 @@ export async function initDatabase(initialSeed: {
         proveedor_id VARCHAR(100) REFERENCES providers(id) ON DELETE SET NULL,
         proveedor_nombre VARCHAR(255),
         fecha_orden TIMESTAMPTZ NOT NULL,
+        ubicacion_servicio JSONB,
         conceptos JSONB NOT NULL DEFAULT '[]'::jsonb,
         subtotal_cliente NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
         costo_total_cliente NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
@@ -134,8 +149,9 @@ export async function initDatabase(initialSeed: {
       );
     `);
 
-    // Ensure numero_pedido column exists for existing tables
+    // Ensure columns exist for existing tables
     await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS numero_pedido VARCHAR(100);');
+    await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS ubicacion_servicio JSONB;');
 
     console.log('[DB] Tablas verificadas exitosamente.');
 
@@ -186,6 +202,20 @@ export async function initDatabase(initialSeed: {
            VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (id) DO NOTHING;`,
           [cat.id, cat.item || '', cat.unidad, cat.descripcion, cat.precioUnitario]
+        );
+      }
+    }
+
+    // Seed service locations (CEDIs) if empty
+    const locCountRes = await client.query('SELECT COUNT(*) FROM service_locations;');
+    if (parseInt(locCountRes.rows[0].count, 10) === 0 && initialSeed.serviceLocations?.length > 0) {
+      console.log('[DB] Sembrando catálogo de ubicaciones / CEDIs...');
+      for (const loc of initialSeed.serviceLocations) {
+        await client.query(
+          `INSERT INTO service_locations (id, division, cedi, direccion, activo)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO NOTHING;`,
+          [loc.id, loc.division, loc.cedi, JSON.stringify(loc.direccion), loc.activo ?? true]
         );
       }
     }
@@ -290,6 +320,24 @@ function mapRowToCatalogConcept(row: any): CatalogConcept {
   };
 }
 
+// Map database row to ServiceLocation object
+function mapRowToServiceLocation(row: any): ServiceLocation {
+  return {
+    id: row.id,
+    division: row.division,
+    cedi: row.cedi,
+    direccion: typeof row.direccion === 'string' ? JSON.parse(row.direccion) : (row.direccion || {
+      calleNumero: '',
+      ciudad: '',
+      estado: '',
+      codigoPostal: '',
+    }),
+    activo: Boolean(row.activo),
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+  };
+}
+
 // Map database row to Order object
 function mapRowToOrder(row: any): Order {
   return {
@@ -301,6 +349,9 @@ function mapRowToOrder(row: any): Order {
     proveedorId: row.proveedor_id || null,
     proveedorNombre: row.proveedor_nombre || null,
     fechaOrden: row.fecha_orden instanceof Date ? row.fecha_orden.toISOString() : row.fecha_orden,
+    ubicacionServicio: row.ubicacion_servicio
+      ? (typeof row.ubicacion_servicio === 'string' ? JSON.parse(row.ubicacion_servicio) : row.ubicacion_servicio)
+      : undefined,
     conceptos: Array.isArray(row.conceptos) ? row.conceptos : JSON.parse(row.conceptos || '[]'),
     subtotalCliente: Number(row.subtotal_cliente) || 0,
     costoTotalCliente: Number(row.costo_total_cliente) || 0,
@@ -449,6 +500,55 @@ export async function dbDeleteCatalogConcept(id: string): Promise<boolean> {
   return (res.rowCount ?? 0) > 0;
 }
 
+// --- SERVICE LOCATIONS (CEDIs) REPOSITORY ---
+export async function dbGetServiceLocations(): Promise<ServiceLocation[]> {
+  const res = await pool.query('SELECT * FROM service_locations ORDER BY division ASC, cedi ASC;');
+  return res.rows.map(mapRowToServiceLocation);
+}
+
+export async function dbGetServiceLocationById(id: string): Promise<ServiceLocation | null> {
+  const res = await pool.query('SELECT * FROM service_locations WHERE id = $1;', [id]);
+  if (res.rows.length === 0) return null;
+  return mapRowToServiceLocation(res.rows[0]);
+}
+
+export async function dbCreateServiceLocation(location: ServiceLocation): Promise<ServiceLocation> {
+  await pool.query(
+    `INSERT INTO service_locations (id, division, cedi, direccion, activo)
+     VALUES ($1, $2, $3, $4, $5);`,
+    [location.id, location.division, location.cedi, JSON.stringify(location.direccion), location.activo ?? true]
+  );
+  return location;
+}
+
+export async function dbUpdateServiceLocation(id: string, updates: Partial<ServiceLocation>): Promise<ServiceLocation | null> {
+  const existing = await dbGetServiceLocationById(id);
+  if (!existing) return null;
+
+  const merged: ServiceLocation = {
+    ...existing,
+    ...updates,
+    direccion: {
+      ...existing.direccion,
+      ...(updates.direccion || {}),
+    },
+  };
+
+  await pool.query(
+    `UPDATE service_locations
+     SET division = $1, cedi = $2, direccion = $3, activo = $4, updated_at = NOW()
+     WHERE id = $5;`,
+    [merged.division, merged.cedi, JSON.stringify(merged.direccion), merged.activo ?? true, id]
+  );
+
+  return merged;
+}
+
+export async function dbDeleteServiceLocation(id: string): Promise<boolean> {
+  const res = await pool.query('DELETE FROM service_locations WHERE id = $1;', [id]);
+  return (res.rowCount ?? 0) > 0;
+}
+
 // --- ORDERS REPOSITORY ---
 export async function dbGetOrders(): Promise<Order[]> {
   const res = await pool.query('SELECT * FROM orders ORDER BY fecha_orden DESC, id DESC;');
@@ -465,7 +565,7 @@ export async function dbCreateOrder(order: Order): Promise<Order> {
   await pool.query(
     `INSERT INTO orders (
       id, numero_pedido, folio, cliente_id, cliente_nombre, proveedor_id, proveedor_nombre,
-      fecha_orden, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
+      fecha_orden, ubicacion_servicio, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
       utilidad_estimada, estado, numero_recepcion, recepcion_registrada_por,
       numero_facturacion, facturacion_registrada_por, facturacion_pendiente,
       created_at, assigned_at, started_at, reception_recorded_at,
@@ -473,12 +573,12 @@ export async function dbCreateOrder(order: Order): Promise<Order> {
       manifiestos, manifiesto_actual, historial
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7,
-      $8, $9, $10, $11, $12,
-      $13, $14, $15, $16,
-      $17, $18, $19,
-      $20, $21, $22, $23,
-      $24, $25, $26, $27,
-      $28, $29, $30
+      $8, $9, $10, $11, $12, $13,
+      $14, $15, $16, $17,
+      $18, $19, $20,
+      $21, $22, $23, $24,
+      $25, $26, $27, $28,
+      $29, $30, $31
     );`,
     [
       order.id,
@@ -489,6 +589,7 @@ export async function dbCreateOrder(order: Order): Promise<Order> {
       order.proveedorId || null,
       order.proveedorNombre || null,
       order.fechaOrden,
+      JSON.stringify(order.ubicacionServicio || null),
       JSON.stringify(order.conceptos || []),
       order.subtotalCliente,
       order.costoTotalCliente,
@@ -527,27 +628,28 @@ export async function dbUpdateOrder(order: Order): Promise<Order> {
        proveedor_id = $6,
        proveedor_nombre = $7,
        fecha_orden = $8,
-       conceptos = $9,
-       subtotal_cliente = $10,
-       costo_total_cliente = $11,
-       costo_proveedor = $12,
-       utilidad_estimada = $13,
-       estado = $14,
-       numero_recepcion = $15,
-       recepcion_registrada_por = $16,
-       numero_facturacion = $17,
-       facturacion_registrada_por = $18,
-       facturacion_pendiente = $19,
-       assigned_at = $20,
-       started_at = $21,
-       reception_recorded_at = $22,
-       manifest_uploaded_at = $23,
-       manifest_reviewed_at = $24,
-       invoiced_at = $25,
-       finalized_at = $26,
-       manifiestos = $27,
-       manifiesto_actual = $28,
-       historial = $29
+       ubicacion_servicio = $9,
+       conceptos = $10,
+       subtotal_cliente = $11,
+       costo_total_cliente = $12,
+       costo_proveedor = $13,
+       utilidad_estimada = $14,
+       estado = $15,
+       numero_recepcion = $16,
+       recepcion_registrada_por = $17,
+       numero_facturacion = $18,
+       facturacion_registrada_por = $19,
+       facturacion_pendiente = $20,
+       assigned_at = $21,
+       started_at = $22,
+       reception_recorded_at = $23,
+       manifest_uploaded_at = $24,
+       manifest_reviewed_at = $25,
+       invoiced_at = $26,
+       finalized_at = $27,
+       manifiestos = $28,
+       manifiesto_actual = $29,
+       historial = $30
      WHERE id = $1;`,
     [
       order.id,
@@ -558,6 +660,7 @@ export async function dbUpdateOrder(order: Order): Promise<Order> {
       order.proveedorId || null,
       order.proveedorNombre || null,
       order.fechaOrden,
+      JSON.stringify(order.ubicacionServicio || null),
       JSON.stringify(order.conceptos || []),
       order.subtotalCliente,
       order.costoTotalCliente,
@@ -588,12 +691,14 @@ export async function dbResetData(seed: {
   providers: Provider[];
   clients: Client[];
   catalogConcepts: CatalogConcept[];
+  serviceLocations: ServiceLocation[];
   orders: Order[];
 }): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN;');
     await client.query('DELETE FROM orders;');
+    await client.query('DELETE FROM service_locations;');
     await client.query('DELETE FROM catalog_concepts;');
     await client.query('DELETE FROM clients;');
     await client.query('DELETE FROM providers;');
@@ -622,11 +727,19 @@ export async function dbResetData(seed: {
       );
     }
 
+    for (const loc of seed.serviceLocations) {
+      await client.query(
+        `INSERT INTO service_locations (id, division, cedi, direccion, activo)
+         VALUES ($1, $2, $3, $4, $5);`,
+        [loc.id, loc.division, loc.cedi, JSON.stringify(loc.direccion), loc.activo ?? true]
+      );
+    }
+
     for (const ord of seed.orders) {
       await client.query(
         `INSERT INTO orders (
           id, numero_pedido, folio, cliente_id, cliente_nombre, proveedor_id, proveedor_nombre,
-          fecha_orden, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
+          fecha_orden, ubicacion_servicio, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
           utilidad_estimada, estado, numero_recepcion, recepcion_registrada_por,
           numero_facturacion, facturacion_registrada_por, facturacion_pendiente,
           created_at, assigned_at, started_at, reception_recorded_at,
@@ -634,12 +747,12 @@ export async function dbResetData(seed: {
           manifiestos, manifiesto_actual, historial
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7,
-          $8, $9, $10, $11, $12,
-          $13, $14, $15, $16,
-          $17, $18, $19,
-          $20, $21, $22, $23,
-          $24, $25, $26, $27,
-          $28, $29, $30
+          $8, $9, $10, $11, $12, $13,
+          $14, $15, $16, $17,
+          $18, $19, $20,
+          $21, $22, $23, $24,
+          $25, $26, $27, $28,
+          $29, $30, $31
         );`,
         [
           ord.id,
@@ -650,6 +763,7 @@ export async function dbResetData(seed: {
           ord.proveedorId || null,
           ord.proveedorNombre || null,
           ord.fechaOrden,
+          JSON.stringify(ord.ubicacionServicio || null),
           JSON.stringify(ord.conceptos || []),
           ord.subtotalCliente,
           ord.costoTotalCliente,

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Order, Provider, Client, Role, CatalogConcept, DatabaseStatus } from './types.ts';
+import type { Order, Provider, Client, Role, CatalogConcept, DatabaseStatus, ServiceLocation } from './types.ts';
 import { Navbar } from './components/Navbar.tsx';
 import { AdminPortal } from './components/AdminPortal.tsx';
 import { ProviderPortal } from './components/ProviderPortal.tsx';
@@ -14,12 +14,14 @@ import { NewOrderModal } from './components/NewOrderModal.tsx';
 import { AcceptanceTestsModal } from './components/AcceptanceTestsModal.tsx';
 import { ProviderCrudModal } from './components/ProviderCrudModal.tsx';
 import { ConceptCatalogModal } from './components/ConceptCatalogModal.tsx';
+import { ServiceLocationModal } from './components/ServiceLocationModal.tsx';
 
 export default function App() {
   const [currentRole, setCurrentRole] = useState<Role>('ADMIN');
   const [providers, setProviders] = useState<Provider[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [catalogConcepts, setCatalogConcepts] = useState<CatalogConcept[]>([]);
+  const [serviceLocations, setServiceLocations] = useState<ServiceLocation[]>([]);
   const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
   const [activeProviderId, setActiveProviderId] = useState<string>('prov-1');
   const [activeClientId, setActiveClientId] = useState<string>('client-1');
@@ -33,8 +35,9 @@ export default function App() {
   const [isAcceptanceTestsOpen, setIsAcceptanceTestsOpen] = useState<boolean>(false);
   const [isProviderCrudOpen, setIsProviderCrudOpen] = useState<boolean>(false);
   const [isConceptCatalogOpen, setIsConceptCatalogOpen] = useState<boolean>(false);
+  const [isServiceLocationsOpen, setIsServiceLocationsOpen] = useState<boolean>(false);
 
-  // Load config (providers, clients, catalog concepts, db status)
+  // Load config (providers, clients, catalog concepts, service locations, db status)
   const loadConfig = async () => {
     try {
       const res = await fetch('/api/config');
@@ -43,6 +46,7 @@ export default function App() {
         setProviders(data.providers || []);
         setClients(data.clients || []);
         setCatalogConcepts(data.catalogConcepts || []);
+        setServiceLocations(data.serviceLocations || []);
         if (data.database) {
           setDbStatus(data.database);
         }
@@ -139,11 +143,13 @@ export default function App() {
                 orders={orders}
                 providers={providers}
                 clients={clients}
+                serviceLocations={serviceLocations}
                 onOpenNewOrder={() => setIsNewOrderOpen(true)}
                 onSelectOrder={(order) => setSelectedOrder(order)}
                 onOpenAcceptanceTests={() => setIsAcceptanceTestsOpen(true)}
                 onOpenProviderCrud={() => setIsProviderCrudOpen(true)}
                 onOpenConceptCatalog={() => setIsConceptCatalogOpen(true)}
+                onOpenServiceLocations={() => setIsServiceLocationsOpen(true)}
               />
             )}
 
@@ -188,6 +194,7 @@ export default function App() {
         onClose={() => setIsNewOrderOpen(false)}
         clients={clients}
         providers={providers}
+        serviceLocations={serviceLocations}
         catalogConcepts={catalogConcepts}
         onOpenCatalogManager={() => setIsConceptCatalogOpen(true)}
         onOrderCreated={loadOrders}
@@ -201,6 +208,16 @@ export default function App() {
         onProvidersChanged={async () => {
           await loadConfig();
           await loadOrders();
+        }}
+      />
+
+      {/* Service Locations CRUD Modal */}
+      <ServiceLocationModal
+        isOpen={isServiceLocationsOpen}
+        onClose={() => setIsServiceLocationsOpen(false)}
+        serviceLocations={serviceLocations}
+        onLocationsChanged={async () => {
+          await loadConfig();
         }}
       />
 
