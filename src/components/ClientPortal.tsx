@@ -43,6 +43,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const filteredOrders = useMemo(() => {
     return clientOrders.filter((o) => {
       const matchesSearch =
+        (o.numeroPedido && o.numeroPedido.toLowerCase().includes(searchTerm.toLowerCase())) ||
         o.folio.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (o.numeroRecepcion && o.numeroRecepcion.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (o.numeroFacturacion && o.numeroFacturacion.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -107,7 +108,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Buscar por folio, número de recepción o factura..."
+            placeholder="Buscar por número de pedido, número de recepción o factura..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full text-xs rounded-xl border border-slate-300 pl-9 pr-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -135,9 +136,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[10px] font-bold">
-                <th className="py-3 px-4">Folio de Orden</th>
+                <th className="py-3 px-4">Número de Pedido</th>
                 <th className="py-3 px-4">Estado Operativo</th>
-                <th className="py-3 px-4">Semáforo SLA</th>
+                <th className="py-3 px-4">Antigüedad</th>
                 <th className="py-3 px-4">Manifiesto Oficial</th>
                 <th className="py-3 px-4">Nº Recepción</th>
                 <th className="py-3 px-4">Nº Factura</th>
@@ -165,7 +166,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     >
                       <td className="py-3 px-4">
                         <div className="font-mono font-bold text-slate-900 group-hover:text-indigo-600 transition">
-                          {o.folio}
+                          {o.numeroPedido || o.folio}
                         </div>
                         <div className="text-[10px] text-slate-400">
                           {new Date(o.fechaOrden).toLocaleDateString('es-MX')}

@@ -34,6 +34,8 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+  const [estadoFilter, setEstadoFilter] = useState<string>('ALL');
+  const [ciudadFilter, setCiudadFilter] = useState<string>('ALL');
 
   // Form states
   const [isEditing, setIsEditing] = useState(false);
@@ -56,6 +58,38 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
 
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const openDocumentInNewTab = (doc: ProviderAuthorizationDoc) => {
+    if (!doc?.fileDataUrl) return;
+    try {
+      const parts = doc.fileDataUrl.split(',');
+      const mime = parts[0].match(/:(.*?);/)?.[1] || doc.fileType || 'application/pdf';
+      const binaryStr = atob(parts[1]);
+      const len = binaryStr.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      const link = document.createElement('a');
+      link.href = doc.fileDataUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -248,6 +282,27 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
     }
   };
 
+  const availableEstados = React.useMemo(() => {
+    const set = new Set<string>();
+    providers.forEach((p) => {
+      if (p.direccion?.estado?.trim()) {
+        set.add(p.direccion.estado.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [providers]);
+
+  const availableCiudades = React.useMemo(() => {
+    const set = new Set<string>();
+    providers.forEach((p) => {
+      if (estadoFilter !== 'ALL' && p.direccion?.estado?.trim() !== estadoFilter) return;
+      if (p.direccion?.ciudad?.trim()) {
+        set.add(p.direccion.ciudad.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [providers, estadoFilter]);
+
   const filteredProviders = providers.filter((p) => {
     const matchesSearch =
       p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -261,7 +316,15 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
       (statusFilter === 'ACTIVE' && p.activo) ||
       (statusFilter === 'INACTIVE' && !p.activo);
 
-    return matchesSearch && matchesStatus;
+    const matchesEstado =
+      estadoFilter === 'ALL' ||
+      (p.direccion?.estado && p.direccion.estado.trim().toLowerCase() === estadoFilter.toLowerCase());
+
+    const matchesCiudad =
+      ciudadFilter === 'ALL' ||
+      (p.direccion?.ciudad && p.direccion.ciudad.trim().toLowerCase() === ciudadFilter.toLowerCase());
+
+    return matchesSearch && matchesStatus && matchesEstado && matchesCiudad;
   });
 
   return (
@@ -541,25 +604,56 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
           )}
 
           {/* Action bar and Search */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 flex-1 min-w-[240px]">
-              <div className="relative flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
+              <div className="relative flex-1 min-w-[180px]">
                 <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Buscar por transportista, RFC, ciudad o estado..."
+                  placeholder="Buscar por transportista, RFC, ciudad..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full text-xs rounded-xl border border-slate-300 pl-8 pr-3 py-1.5 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
 
+              {/* Filtro Estado / Entidad */}
+              <select
+                value={estadoFilter}
+                onChange={(e) => {
+                  setEstadoFilter(e.target.value);
+                  setCiudadFilter('ALL');
+                }}
+                className="text-xs rounded-xl border border-slate-300 px-2.5 py-1.5 bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="ALL">Todos los Estados</option>
+                {availableEstados.map((st) => (
+                  <option key={st} value={st}>
+                    {st}
+                  </option>
+                ))}
+              </select>
+
+              {/* Filtro Ciudad o Municipio */}
+              <select
+                value={ciudadFilter}
+                onChange={(e) => setCiudadFilter(e.target.value)}
+                className="text-xs rounded-xl border border-slate-300 px-2.5 py-1.5 bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="ALL">Todas las Ciudades/Municipios</option>
+                {availableCiudades.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as any)}
                 className="text-xs rounded-xl border border-slate-300 px-2.5 py-1.5 bg-white text-slate-700 focus:outline-none"
               >
-                <option value="ALL">Todos los Estados</option>
+                <option value="ALL">Estatus: Todos</option>
                 <option value="ACTIVE">Solo Activos</option>
                 <option value="INACTIVE">Solo Inactivos</option>
               </select>
@@ -637,10 +731,13 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
                               {p.autorizacionDocumento.fileName}
                             </span>
                             <button
-                              onClick={() =>
-                                alert(`Visualizando autorización de ${p.nombre}: ${p.autorizacionDocumento?.fileName}`)
-                              }
+                              onClick={() => {
+                                if (p.autorizacionDocumento) {
+                                  openDocumentInNewTab(p.autorizacionDocumento);
+                                }
+                              }}
                               className="text-[10px] text-indigo-600 hover:text-indigo-800 underline font-medium"
+                              title="Abrir autorización en una nueva pestaña"
                             >
                               Ver
                             </button>

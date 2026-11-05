@@ -51,6 +51,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   onOrderCreated,
 }) => {
   // Requisito 1: Cada que abrimos Nueva Orden los valores deben estar en limpio
+  const [numeroPedido, setNumeroPedido] = useState<string>('');
   const [clienteId, setClienteId] = useState<string>('');
   const [proveedorId, setProveedorId] = useState<string | null>(null);
   const [costoProveedor, setCostoProveedor] = useState<string>('');
@@ -77,6 +78,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   // Inicializar en limpio cada vez que se abre el modal (Requisito 1)
   useEffect(() => {
     if (isOpen) {
+      setNumeroPedido('');
       setClienteId(clients[0]?.id || '');
       setProveedorId(null);
       setCostoProveedor('');
@@ -201,6 +203,11 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     e.preventDefault();
     setGeneralError(null);
 
+    if (!numeroPedido.trim()) {
+      setGeneralError('El Número de Pedido es obligatorio.');
+      return;
+    }
+
     if (!clienteId) {
       setGeneralError('Por favor seleccione un cliente.');
       return;
@@ -219,6 +226,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     setSubmitting(true);
     try {
       const payload = {
+        numeroPedido: numeroPedido.trim(),
         clienteId,
         proveedorId: proveedorId || null,
         costoProveedor: proveedorId ? Number(costoProveedor) : null,
@@ -279,25 +287,42 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               </div>
             )}
 
-            {/* SECCIÓN 1: CLIENTE */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                <Building2 className="h-3.5 w-3.5 text-slate-500" />
-                Cliente de la Recolección *
-              </label>
-              <select
-                value={clienteId}
-                onChange={(e) => setClienteId(e.target.value)}
-                className="w-full text-xs font-semibold rounded-xl border border-slate-300 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
-                required
-              >
-                <option value="">-- Seleccione un cliente --</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre} (RFC: {c.rfc})
-                  </option>
-                ))}
-              </select>
+            {/* SECCIÓN 1: NÚMERO DE PEDIDO Y CLIENTE */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-3.5">
+              <div className="md:col-span-4">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                  <span>Número de Pedido *</span>
+                  <span className="text-[10px] text-blue-600 font-semibold lowercase">identificador</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej. PED-2026-001 o ID de pedido"
+                  value={numeroPedido}
+                  onChange={(e) => setNumeroPedido(e.target.value)}
+                  className="w-full text-xs font-bold uppercase rounded-xl border border-slate-300 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-xs font-mono"
+                  required
+                />
+              </div>
+
+              <div className="md:col-span-8">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5 text-slate-500" />
+                  Cliente *
+                </label>
+                <select
+                  value={clienteId}
+                  onChange={(e) => setClienteId(e.target.value)}
+                  className="w-full text-xs font-semibold rounded-xl border border-slate-300 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
+                  required
+                >
+                  <option value="">-- Seleccione un cliente --</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre} (RFC: {c.rfc})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* SECCIÓN 2: FORMULARIO PARA AGREGAR NUEVO CONCEPTO */}
@@ -374,7 +399,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   />
                 </div>
 
-                {/* CANTIDAD ORDENADA */}
+                {/* CANTIDAD ORDENADA (sin flechas up/down) */}
                 <div className="col-span-6 md:col-span-2">
                   <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
                     CANTIDAD *
@@ -386,7 +411,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     placeholder="1.00"
                     value={inputCantidad}
                     onChange={(e) => setInputCantidad(e.target.value)}
-                    className="w-full text-xs rounded-lg border border-slate-300 px-2 py-1.5 text-right bg-white font-mono"
+                    className="w-full text-xs rounded-lg border border-slate-300 px-2.5 py-1.5 text-right bg-white font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </div>
 
@@ -400,11 +425,11 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     placeholder="ST, KG, LT..."
                     value={inputUnidad}
                     onChange={(e) => setInputUnidad(e.target.value.toUpperCase())}
-                    className="w-full text-xs rounded-lg border border-slate-300 px-2 py-1.5 bg-white uppercase font-mono font-bold"
+                    className="w-full text-xs rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white uppercase font-mono font-bold text-center"
                   />
                 </div>
 
-                {/* PRECIO UNITARIO */}
+                {/* PRECIO UNITARIO (sin flechas up/down) */}
                 <div className="col-span-6 md:col-span-2">
                   <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
                     PRECIO UNIT. *
@@ -418,7 +443,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                       placeholder="0.00"
                       value={inputPrecioUnitario}
                       onChange={(e) => setInputPrecioUnitario(e.target.value)}
-                      className="w-full text-xs rounded-lg border border-slate-300 pl-5 pr-2 py-1.5 text-right bg-white font-mono"
+                      className="w-full text-xs rounded-lg border border-slate-300 pl-5 pr-2 py-1.5 text-right bg-white font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
                   </div>
                 </div>
@@ -505,13 +530,15 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                 )}
               </div>
 
-              {/* TABLA ESTILO EXACTO A LA IMAGEN ADJUNTA */}
+              {/* TABLA ESTILO EXACTO A LA IMAGEN ADJUNTA CON COLUMNAS SEPARADAS */}
               <div className="overflow-hidden rounded-xl border border-slate-200 shadow-xs">
                 <table className="w-full text-left border-collapse">
-                  {/* Encabezado azul marino corporativo (exacto imagen) */}
+                  {/* Encabezado azul marino corporativo */}
                   <thead>
                     <tr className="bg-[#004b93] text-white text-xs font-black uppercase tracking-wider">
                       <th className="py-3 px-4 text-left font-black">DESCRIPCIÓN</th>
+                      <th className="py-3 px-3 text-right font-black">CANTIDAD</th>
+                      <th className="py-3 px-3 text-center font-black">UNIDAD</th>
                       <th className="py-3 px-4 text-right font-black">PRECIO UNITARIO</th>
                       <th className="py-3 px-4 text-right font-black">PRECIO TOTAL</th>
                       <th className="py-3 px-3 text-center font-black w-24">ACCIONES</th>
@@ -520,7 +547,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   <tbody className="divide-y divide-slate-200 bg-white text-xs text-slate-800">
                     {conceptos.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="py-8 text-center text-slate-400 bg-slate-50/50">
+                        <td colSpan={6} className="py-8 text-center text-slate-400 bg-slate-50/50">
                           <Calculator className="h-8 w-8 text-slate-300 mx-auto mb-2" />
                           <p className="font-semibold text-slate-600">Aún no se han agregado conceptos a la orden</p>
                           <p className="text-[11px] text-slate-400 mt-0.5">
@@ -543,7 +570,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                               isBeingEdited ? 'bg-amber-50/70 font-semibold' : ''
                             }`}
                           >
-                            {/* DESCRIPCIÓN (con detalle de unidad y cantidad si aplica) */}
+                            {/* DESCRIPCIÓN */}
                             <td className="py-3 px-4 text-slate-900 font-medium">
                               <div className="flex items-center gap-2">
                                 <span>{concept.descripcion}</span>
@@ -553,10 +580,21 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-slate-400 font-normal mt-0.5">
-                                Cantidad: {concept.cantidadOrdenada.toLocaleString('es-MX', { minimumFractionDigits: 2 })}{' '}
+                            </td>
+
+                            {/* CANTIDAD */}
+                            <td className="py-3 px-3 text-right font-mono font-bold text-slate-800">
+                              {concept.cantidadOrdenada.toLocaleString('es-MX', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </td>
+
+                            {/* UNIDAD */}
+                            <td className="py-3 px-3 text-center font-mono font-bold text-slate-700">
+                              <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[11px]">
                                 {concept.unidad}
-                              </div>
+                              </span>
                             </td>
 
                             {/* PRECIO UNITARIO */}
@@ -608,7 +646,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   {conceptos.length > 0 && (
                     <tfoot>
                       <tr className="bg-slate-50 border-t-2 border-slate-300 font-bold text-slate-900">
-                        <td className="py-3 px-4 text-right uppercase tracking-wider text-xs text-slate-600">
+                        <td colSpan={3} className="py-3 px-4 text-right uppercase tracking-wider text-xs text-slate-600">
                           Costo total (Suma del Precio Total):
                         </td>
                         <td className="py-3 px-4 text-right text-xs text-slate-500 font-normal">

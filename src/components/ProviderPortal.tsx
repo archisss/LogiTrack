@@ -50,6 +50,7 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
   const filteredOrders = useMemo(() => {
     return assignedOrders.filter((o) => {
       const matchesSearch =
+        (o.numeroPedido && o.numeroPedido.toLowerCase().includes(searchTerm.toLowerCase())) ||
         o.folio.toLowerCase().includes(searchTerm.toLowerCase()) ||
         o.clienteNombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (o.numeroRecepcion && o.numeroRecepcion.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -190,7 +191,7 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Buscar en sus órdenes por folio, cliente o número de recepción..."
+            placeholder="Buscar en sus órdenes por número de pedido, cliente o número de recepción..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full text-xs rounded-xl border border-slate-300 pl-9 pr-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -217,9 +218,9 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[10px] font-bold">
-                <th className="py-3 px-4">Folio & Cliente</th>
+                <th className="py-3 px-4">Número de Pedido & Cliente</th>
                 <th className="py-3 px-4">Estado Operativo</th>
-                <th className="py-3 px-4">Semáforo SLA</th>
+                <th className="py-3 px-4">Antigüedad</th>
                 <th className="py-3 px-4">Manifiesto Actual</th>
                 <th className="py-3 px-4">Nº Recepción</th>
                 <th className="py-3 px-4 text-right">Su Tarifa Cobrada</th>
@@ -244,7 +245,7 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
                     >
                       <td className="py-3 px-4">
                         <div className="font-mono font-bold text-slate-900 group-hover:text-blue-600 transition">
-                          {o.folio}
+                          {o.numeroPedido || o.folio}
                         </div>
                         <div className="text-[11px] text-slate-500 font-medium truncate max-w-[200px]">
                           {o.clienteNombre}
@@ -331,7 +332,7 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
               <div className="flex items-center gap-2">
                 <Upload className="h-5 w-5 text-blue-600" />
                 <h3 className="text-sm font-bold text-slate-900">
-                  Carga de Manifiesto — {uploadingOrder.folio}
+                  Carga de Manifiesto — {uploadingOrder.numeroPedido || uploadingOrder.folio}
                 </h3>
               </div>
               <button onClick={() => setUploadingOrder(null)} className="text-slate-400 hover:text-slate-700">✕</button>

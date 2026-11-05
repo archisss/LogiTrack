@@ -93,6 +93,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
       const matchesSearch =
+        (o.numeroPedido && o.numeroPedido.toLowerCase().includes(searchTerm.toLowerCase())) ||
         o.folio.toLowerCase().includes(searchTerm.toLowerCase()) ||
         o.clienteNombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (o.proveedorNombre && o.proveedorNombre.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -198,14 +199,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs col-span-2">
           <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center justify-between">
-            <span>Semáforo SLA (America/Mexico_City)</span>
-            <span className="text-[10px] text-slate-400 font-normal">Días calendario</span>
+            <span>Antigüedad</span>
+            <span className="text-[10px] text-slate-400 font-normal">Días transcurridos</span>
           </div>
           <div className="flex items-center justify-between gap-1 text-center">
-            <div className="flex-1 bg-slate-100 rounded-lg py-1 px-1.5">
-              <span className="text-xs font-bold text-slate-700 block">{metrics.slaCounts.gray}</span>
-              <span className="text-[9px] text-slate-500 font-semibold block">&lt;1 día</span>
-            </div>
             <div className="flex-1 bg-emerald-50 rounded-lg py-1 px-1.5 border border-emerald-200">
               <span className="text-xs font-bold text-emerald-800 block">{metrics.slaCounts.green}</span>
               <span className="text-[9px] text-emerald-700 font-semibold block">1-5d</span>
@@ -232,7 +229,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Buscar por folio, cliente, proveedor, recepción o factura..."
+            placeholder="Buscar por número de pedido, cliente, proveedor, recepción o factura..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full text-xs rounded-xl border border-slate-300 pl-9 pr-3 py-2 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -255,18 +252,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <option value="FINALIZADO">FINALIZADO</option>
           </select>
 
-          {/* SLA Filter */}
+          {/* Antigüedad Filter */}
           <select
             value={slaFilter}
             onChange={(e) => setSlaFilter(e.target.value)}
             className="text-xs rounded-xl border border-slate-300 px-3 py-2 bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
           >
-            <option value="TODOS">Todos los SLAs</option>
-            <option value="green">Verde (1 a 5 días)</option>
-            <option value="yellow">Amarillo (6 a 8 días)</option>
-            <option value="orange">Naranja (9 a 10 días)</option>
-            <option value="red">Rojo (11+ días)</option>
-            <option value="gray">Gris (&lt; 1 día)</option>
+            <option value="TODOS">Toda Antigüedad</option>
+            <option value="green">1 a 5 días</option>
+            <option value="yellow">6 a 8 días</option>
+            <option value="orange">9 a 10 días</option>
+            <option value="red">11+ días</option>
           </select>
 
           {/* Provider Filter */}
@@ -291,14 +287,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[10px] font-bold">
-                <th className="py-3 px-4">Folio & Cliente</th>
+                <th className="py-3 px-4">Número de Pedido & Cliente</th>
                 <th className="py-3 px-4">Estado Operativo</th>
                 <th className="py-3 px-4">Transportista Asignado</th>
                 <th className="py-3 px-4 text-right">Cobro Cliente</th>
                 <th className="py-3 px-4 text-right">Costo Prov.</th>
                 <th className="py-3 px-4 text-right">Utilidad Est.</th>
                 <th className="py-3 px-4">Manifiesto</th>
-                <th className="py-3 px-4">Semáforo SLA</th>
+                <th className="py-3 px-4">Antigüedad</th>
                 <th className="py-3 px-4 text-center">Acciones</th>
               </tr>
             </thead>
@@ -320,7 +316,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     >
                       <td className="py-3 px-4">
                         <div className="font-mono font-bold text-slate-900 group-hover:text-indigo-600 transition">
-                          {o.folio}
+                          {o.numeroPedido || o.folio}
                         </div>
                         <div className="text-[11px] text-slate-500 font-medium truncate max-w-[170px]">
                           {o.clienteNombre}

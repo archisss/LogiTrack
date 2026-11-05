@@ -129,7 +129,7 @@ export const SlaBadge: React.FC<SlaBadgeProps> = ({ days, color, label, isFinali
     <div className="flex flex-col">
       <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${style.bg} ${style.text} ${style.border}`}>
         <span className={`h-2.5 w-2.5 rounded-full ${style.circle}`} />
-        <span>{label}</span>
+        <span>{days === 1 ? '1 día' : `${days} días`}</span>
       </div>
       {isFinalized && (
         <span className="text-[10px] text-slate-500 text-center font-medium mt-0.5">

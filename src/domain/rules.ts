@@ -83,23 +83,23 @@ export function calculateSla(order: Pick<Order, 'estado' | 'assignedAt' | 'fecha
   const days = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
 
   let color: SlaColor = 'gray';
-  let label = 'Menos de 1 día';
+  let label = '0 días';
 
   if (days === 0) {
     color = 'gray';
-    label = 'Hoy (0 días)';
+    label = '0 días';
   } else if (days >= 1 && days <= 5) {
     color = 'green';
-    label = `${days} días (Óptimo)`;
+    label = `${days} ${days === 1 ? 'día' : 'días'}`;
   } else if (days >= 6 && days <= 8) {
     color = 'yellow';
-    label = `${days} días (Atención)`;
+    label = `${days} días`;
   } else if (days >= 9 && days <= 10) {
     color = 'orange';
-    label = `${days} días (Urgente)`;
+    label = `${days} días`;
   } else {
     color = 'red';
-    label = `${days} días (Vencido)`;
+    label = `${days} días`;
   }
 
   return {

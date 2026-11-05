@@ -37,6 +37,7 @@ function createMockOrder(overrides: Partial<Order> = {}): Order {
 
   const base: Order = {
     id: `ORD-TEST-${Math.floor(Math.random() * 10000)}`,
+    numeroPedido: `PED-TEST-${Math.floor(Math.random() * 10000)}`,
     folio: `FOL-${Math.floor(Math.random() * 10000)}`,
     clienteId: 'client-1',
     clienteNombre: 'Bimbo México SA de CV',

@@ -215,6 +215,7 @@ function getInitialSeedOrders(): Order[] {
     // 1. CREADO (sin proveedor, 2 días desde fechaOrden -> SLA Verde)
     {
       id: 'ORD-2026-001',
+      numeroPedido: 'PED-2026-001',
       folio: 'FOL-001',
       clienteId: 'client-1',
       clienteNombre: 'Bimbo México SA de CV',
@@ -258,6 +259,7 @@ function getInitialSeedOrders(): Order[] {
     // 2. ASIGNANDO (asignado hace 7 días -> SLA Amarillo)
     {
       id: 'ORD-2026-002',
+      numeroPedido: 'PED-2026-002',
       folio: 'FOL-002',
       clienteId: 'client-2',
       clienteNombre: 'Grupo Modelo S de RL de CV',
@@ -311,6 +313,7 @@ function getInitialSeedOrders(): Order[] {
     // 3. EN_PROCESO (asignado hace 9 días -> SLA Naranja, manifiesto v1 PENDING cargado)
     {
       id: 'ORD-2026-003',
+      numeroPedido: 'PED-2026-003',
       folio: 'FOL-003',
       clienteId: 'client-3',
       clienteNombre: 'Femsa Coca-Cola México',
@@ -401,6 +404,7 @@ function getInitialSeedOrders(): Order[] {
     // 4. COMPLETO (recepción REC-2026-4401 registrada, assigned hace 12 días -> SLA Rojo, v1 rechazada, v2 PENDING)
     {
       id: 'ORD-2026-004',
+      numeroPedido: 'PED-2026-004',
       folio: 'FOL-004',
       clienteId: 'client-1',
       clienteNombre: 'Bimbo México SA de CV',
@@ -526,6 +530,7 @@ function getInitialSeedOrders(): Order[] {
     // 5. FACTURADO (recepción + factura FAC-2026-9011 registrada, falta aprobar manifiesto)
     {
       id: 'ORD-2026-005',
+      numeroPedido: 'PED-2026-005',
       folio: 'FOL-005',
       clienteId: 'client-3',
       clienteNombre: 'Femsa Coca-Cola México',
@@ -633,6 +638,7 @@ function getInitialSeedOrders(): Order[] {
     // 6. FINALIZADO (cumplió recepción, factura y manifiesto aprobado. Finalizado hace 2 días, SLA congelado)
     {
       id: 'ORD-2026-006',
+      numeroPedido: 'PED-2026-006',
       folio: 'FOL-006',
       clienteId: 'client-2',
       clienteNombre: 'Grupo Modelo S de RL de CV',
@@ -1061,7 +1067,12 @@ async function startServer() {
   // Create order (Admin only)
   app.post('/api/orders', async (req: Request, res: Response) => {
     try {
-      const { clienteId, conceptos, proveedorId, costoProveedor, user } = req.body;
+      const { clienteId, conceptos, proveedorId, costoProveedor, user, numeroPedido } = req.body;
+
+      if (!numeroPedido || String(numeroPedido).trim().length === 0) {
+        return res.status(400).json({ error: 'El Número de Pedido es obligatorio' });
+      }
+      const cleanNumeroPedido = String(numeroPedido).trim();
 
       if (!clienteId) {
         return res.status(400).json({ error: 'El cliente es requerido' });
@@ -1069,6 +1080,18 @@ async function startServer() {
       const client = await dbGetClientById(clienteId);
       if (!client) {
         return res.status(400).json({ error: 'Cliente inválido' });
+      }
+
+      const allOrders = await dbGetOrders();
+      const duplicatePedido = allOrders.find(
+        (o) =>
+          (o.numeroPedido && o.numeroPedido.toUpperCase() === cleanNumeroPedido.toUpperCase()) ||
+          o.id.toUpperCase() === cleanNumeroPedido.toUpperCase()
+      );
+      if (duplicatePedido) {
+        return res.status(400).json({
+          error: `Ya existe una orden registrada con el Número de Pedido "${cleanNumeroPedido}". El número de pedido debe ser único.`,
+        });
       }
 
       if (!conceptos || !Array.isArray(conceptos) || conceptos.length === 0) {
@@ -1120,14 +1143,13 @@ async function startServer() {
 
       const totals = calculateOrderTotals(sanitizedConceptos, provCostNumber);
 
-      const allOrders = await dbGetOrders();
       const newOrderNumber = allOrders.length + 1;
       const newFolio = `FOL-${String(newOrderNumber).padStart(3, '0')}`;
-      const newId = `ORD-2026-${String(newOrderNumber).padStart(3, '0')}`;
       const nowIso = new Date().toISOString();
 
       const newOrder: Order = {
-        id: newId,
+        id: cleanNumeroPedido,
+        numeroPedido: cleanNumeroPedido,
         folio: newFolio,
         clienteId: client.id,
         clienteNombre: client.nombre,

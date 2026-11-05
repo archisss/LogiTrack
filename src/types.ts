@@ -91,7 +91,8 @@ export interface Client {
 
 export interface Order {
   id: string;
-  folio: string;
+  numeroPedido: string; // Identificador / ID del pedido
+  folio: string; // Folio de proceso interno
   clienteId: string;
   clienteNombre: string;
   proveedorId: string | null;

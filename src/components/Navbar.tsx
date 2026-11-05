@@ -29,12 +29,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-black text-base tracking-tight text-white">LogiTrack</span>
-                <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-300 border border-indigo-400/30 px-2 py-0.5 rounded-full">
-                  MVP Definitivo
-                </span>
               </div>
               <p className="text-[11px] text-slate-400 leading-none mt-0.5">
-                Control Operativo de Órdenes, Utilidad & Manifiestos
+                Control Operativo de Órdenes y Servicios
               </p>
             </div>
           </div>

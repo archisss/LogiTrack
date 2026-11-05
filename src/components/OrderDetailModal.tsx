@@ -236,7 +236,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-base font-bold text-white tracking-wide">
-                  {order.folio}
+                  {order.numeroPedido || order.folio}
                 </span>
                 <StatusBadge status={order.estado} size="sm" />
                 {order.manifiestoActual && (
@@ -248,7 +248,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               </div>
               <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
                 <Building2 className="h-3.5 w-3.5 text-slate-400" />
-                {order.clienteNombre} &bull; ID: {order.id}
+                {order.clienteNombre} &bull; Folio interno: <span className="font-mono text-slate-300 font-bold">{order.folio}</span>
               </p>
             </div>
           </div>
@@ -398,8 +398,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                         {order.conceptos.map((c, idx) => {
                           const cantidadFormatted = (c.cantidadOrdenada ?? c.cantidad ?? 0).toFixed(2);
                           const unidadVal = c.unidad || 'ST';
-                          const itemVal = c.item || c.descripcion;
-                          const descVal = c.descripcion && c.descripcion !== c.item ? c.descripcion : '';
+                          const itemVal = c.item || '-';
+                          const descVal = c.descripcion;
                           const precioUnitFormatted = `$ ${c.precioUnitario.toLocaleString('es-MX', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
@@ -417,10 +417,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                               <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
                                 {unidadVal}
                               </td>
-                              <td className="py-2.5 px-3 font-semibold text-slate-900">
+                              <td className="py-2.5 px-3 font-mono text-slate-500">
                                 {itemVal}
                               </td>
-                              <td className="py-2.5 px-3 text-slate-500 font-mono">
+                              <td className="py-2.5 px-3 font-semibold text-slate-900">
                                 {descVal}
                               </td>
                               <td className="py-2.5 px-3 text-right font-mono text-slate-700">

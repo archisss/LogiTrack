@@ -102,6 +102,7 @@ export async function initDatabase(initialSeed: {
     await client.query(`
       CREATE TABLE IF NOT EXISTS orders (
         id VARCHAR(100) PRIMARY KEY,
+        numero_pedido VARCHAR(100),
         folio VARCHAR(100) NOT NULL UNIQUE,
         cliente_id VARCHAR(100) NOT NULL REFERENCES clients(id),
         cliente_nombre VARCHAR(255) NOT NULL,
@@ -132,6 +133,9 @@ export async function initDatabase(initialSeed: {
         historial JSONB NOT NULL DEFAULT '[]'::jsonb
       );
     `);
+
+    // Ensure numero_pedido column exists for existing tables
+    await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS numero_pedido VARCHAR(100);');
 
     console.log('[DB] Tablas verificadas exitosamente.');
 
@@ -290,6 +294,7 @@ function mapRowToCatalogConcept(row: any): CatalogConcept {
 function mapRowToOrder(row: any): Order {
   return {
     id: row.id,
+    numeroPedido: row.numero_pedido || row.folio,
     folio: row.folio,
     clienteId: row.cliente_id,
     clienteNombre: row.cliente_nombre,
@@ -459,7 +464,7 @@ export async function dbGetOrderById(id: string): Promise<Order | null> {
 export async function dbCreateOrder(order: Order): Promise<Order> {
   await pool.query(
     `INSERT INTO orders (
-      id, folio, cliente_id, cliente_nombre, proveedor_id, proveedor_nombre,
+      id, numero_pedido, folio, cliente_id, cliente_nombre, proveedor_id, proveedor_nombre,
       fecha_orden, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
       utilidad_estimada, estado, numero_recepcion, recepcion_registrada_por,
       numero_facturacion, facturacion_registrada_por, facturacion_pendiente,
@@ -467,16 +472,17 @@ export async function dbCreateOrder(order: Order): Promise<Order> {
       manifest_uploaded_at, manifest_reviewed_at, invoiced_at, finalized_at,
       manifiestos, manifiesto_actual, historial
     ) VALUES (
-      $1, $2, $3, $4, $5, $6,
-      $7, $8, $9, $10, $11,
-      $12, $13, $14, $15,
-      $16, $17, $18,
-      $19, $20, $21, $22,
-      $23, $24, $25, $26,
-      $27, $28, $29
+      $1, $2, $3, $4, $5, $6, $7,
+      $8, $9, $10, $11, $12,
+      $13, $14, $15, $16,
+      $17, $18, $19,
+      $20, $21, $22, $23,
+      $24, $25, $26, $27,
+      $28, $29, $30
     );`,
     [
       order.id,
+      order.numeroPedido || order.folio,
       order.folio,
       order.clienteId,
       order.clienteNombre,
@@ -514,36 +520,38 @@ export async function dbUpdateOrder(order: Order): Promise<Order> {
   await pool.query(
     `UPDATE orders
      SET
-       folio = $2,
-       cliente_id = $3,
-       cliente_nombre = $4,
-       proveedor_id = $5,
-       proveedor_nombre = $6,
-       fecha_orden = $7,
-       conceptos = $8,
-       subtotal_cliente = $9,
-       costo_total_cliente = $10,
-       costo_proveedor = $11,
-       utilidad_estimada = $12,
-       estado = $13,
-       numero_recepcion = $14,
-       recepcion_registrada_por = $15,
-       numero_facturacion = $16,
-       facturacion_registrada_por = $17,
-       facturacion_pendiente = $18,
-       assigned_at = $19,
-       started_at = $20,
-       reception_recorded_at = $21,
-       manifest_uploaded_at = $22,
-       manifest_reviewed_at = $23,
-       invoiced_at = $24,
-       finalized_at = $25,
-       manifiestos = $26,
-       manifiesto_actual = $27,
-       historial = $28
+       numero_pedido = $2,
+       folio = $3,
+       cliente_id = $4,
+       cliente_nombre = $5,
+       proveedor_id = $6,
+       proveedor_nombre = $7,
+       fecha_orden = $8,
+       conceptos = $9,
+       subtotal_cliente = $10,
+       costo_total_cliente = $11,
+       costo_proveedor = $12,
+       utilidad_estimada = $13,
+       estado = $14,
+       numero_recepcion = $15,
+       recepcion_registrada_por = $16,
+       numero_facturacion = $17,
+       facturacion_registrada_por = $18,
+       facturacion_pendiente = $19,
+       assigned_at = $20,
+       started_at = $21,
+       reception_recorded_at = $22,
+       manifest_uploaded_at = $23,
+       manifest_reviewed_at = $24,
+       invoiced_at = $25,
+       finalized_at = $26,
+       manifiestos = $27,
+       manifiesto_actual = $28,
+       historial = $29
      WHERE id = $1;`,
     [
       order.id,
+      order.numeroPedido || order.folio,
       order.folio,
       order.clienteId,
       order.clienteNombre,
@@ -617,7 +625,7 @@ export async function dbResetData(seed: {
     for (const ord of seed.orders) {
       await client.query(
         `INSERT INTO orders (
-          id, folio, cliente_id, cliente_nombre, proveedor_id, proveedor_nombre,
+          id, numero_pedido, folio, cliente_id, cliente_nombre, proveedor_id, proveedor_nombre,
           fecha_orden, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
           utilidad_estimada, estado, numero_recepcion, recepcion_registrada_por,
           numero_facturacion, facturacion_registrada_por, facturacion_pendiente,
@@ -625,16 +633,17 @@ export async function dbResetData(seed: {
           manifest_uploaded_at, manifest_reviewed_at, invoiced_at, finalized_at,
           manifiestos, manifiesto_actual, historial
         ) VALUES (
-          $1, $2, $3, $4, $5, $6,
-          $7, $8, $9, $10, $11,
-          $12, $13, $14, $15,
-          $16, $17, $18,
-          $19, $20, $21, $22,
-          $23, $24, $25, $26,
-          $27, $28, $29
+          $1, $2, $3, $4, $5, $6, $7,
+          $8, $9, $10, $11, $12,
+          $13, $14, $15, $16,
+          $17, $18, $19,
+          $20, $21, $22, $23,
+          $24, $25, $26, $27,
+          $28, $29, $30
         );`,
         [
           ord.id,
+          ord.numeroPedido || ord.folio,
           ord.folio,
           ord.clienteId,
           ord.clienteNombre,
