@@ -3,9 +3,9 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies with legacy-peer-deps to prevent peer resolution conflicts
 COPY package*.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Copy source code and build client SPA
 COPY . .
@@ -21,7 +21,7 @@ ENV PORT=3000
 
 # Install production dependencies and local tsx runtime
 COPY package*.json ./
-RUN npm install --omit=dev && npm install tsx
+RUN npm install --omit=dev --legacy-peer-deps && npm install tsx --legacy-peer-deps
 
 # Copy built frontend assets and server files
 COPY --from=builder /app/dist ./dist
