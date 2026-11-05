@@ -59,6 +59,27 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const availableEstados = React.useMemo(() => {
+    const set = new Set<string>();
+    providers.forEach((p) => {
+      if (p.direccion?.estado?.trim()) {
+        set.add(p.direccion.estado.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [providers]);
+
+  const availableCiudades = React.useMemo(() => {
+    const set = new Set<string>();
+    providers.forEach((p) => {
+      if (estadoFilter !== 'ALL' && p.direccion?.estado?.trim() !== estadoFilter) return;
+      if (p.direccion?.ciudad?.trim()) {
+        set.add(p.direccion.ciudad.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [providers, estadoFilter]);
+
   const openDocumentInNewTab = (doc: ProviderAuthorizationDoc) => {
     if (!doc?.fileDataUrl) return;
     try {
@@ -281,27 +302,6 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
       setLoading(false);
     }
   };
-
-  const availableEstados = React.useMemo(() => {
-    const set = new Set<string>();
-    providers.forEach((p) => {
-      if (p.direccion?.estado?.trim()) {
-        set.add(p.direccion.estado.trim());
-      }
-    });
-    return Array.from(set).sort();
-  }, [providers]);
-
-  const availableCiudades = React.useMemo(() => {
-    const set = new Set<string>();
-    providers.forEach((p) => {
-      if (estadoFilter !== 'ALL' && p.direccion?.estado?.trim() !== estadoFilter) return;
-      if (p.direccion?.ciudad?.trim()) {
-        set.add(p.direccion.ciudad.trim());
-      }
-    });
-    return Array.from(set).sort();
-  }, [providers, estadoFilter]);
 
   const filteredProviders = providers.filter((p) => {
     const matchesSearch =

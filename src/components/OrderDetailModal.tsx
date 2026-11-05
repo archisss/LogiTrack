@@ -40,25 +40,49 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   clients,
   onOrderUpdated,
 }) => {
-  if (!isOpen || !order) return null;
-
   const [activeTab, setActiveTab] = useState<'operacion' | 'manifiesto' | 'historial'>('operacion');
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Form states
-  const [selectedProviderId, setSelectedProviderId] = useState<string>(order.proveedorId || '');
+  const [selectedProviderId, setSelectedProviderId] = useState<string>(order?.proveedorId || '');
   const [costoProveedorInput, setCostoProveedorInput] = useState<string>(
-    order.costoProveedor !== null ? String(order.costoProveedor) : ''
+    order?.costoProveedor !== null && order?.costoProveedor !== undefined ? String(order.costoProveedor) : ''
   );
-  const [numeroRecepcionInput, setNumeroRecepcionInput] = useState<string>(order.numeroRecepcion || '');
+  const [numeroRecepcionInput, setNumeroRecepcionInput] = useState<string>(order?.numeroRecepcion || '');
   const [numeroFacturacionInput, setNumeroFacturacionInput] = useState<string>(
-    order.numeroFacturacion || order.facturacionPendiente || ''
+    order?.numeroFacturacion || order?.facturacionPendiente || ''
   );
   const [rejectionReason, setRejectionReason] = useState<string>('');
   const [showRejectBox, setShowRejectBox] = useState<boolean>(false);
   const [reopenReason, setReopenReason] = useState<string>('');
   const [showReopenBox, setShowReopenBox] = useState<boolean>(false);
+
+  // Keep form fields synced when a different order is selected or updated
+  React.useEffect(() => {
+    if (order) {
+      setSelectedProviderId(order.proveedorId || '');
+      setCostoProveedorInput(
+        order.costoProveedor !== null && order.costoProveedor !== undefined ? String(order.costoProveedor) : ''
+      );
+      setNumeroRecepcionInput(order.numeroRecepcion || '');
+      setNumeroFacturacionInput(order.numeroFacturacion || order.facturacionPendiente || '');
+      setRejectionReason('');
+      setShowRejectBox(false);
+      setReopenReason('');
+      setShowReopenBox(false);
+      setFeedback(null);
+    }
+  }, [
+    order?.id,
+    order?.proveedorId,
+    order?.costoProveedor,
+    order?.numeroRecepcion,
+    order?.numeroFacturacion,
+    order?.facturacionPendiente,
+  ]);
+
+  if (!isOpen || !order) return null;
 
   // SLA calculation
   const sla = calculateSla(order);
