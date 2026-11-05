@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Decimal from 'decimal.js';
+import 'dotenv/config';
 import type {
   Order,
   OrderStatus,
@@ -22,6 +23,27 @@ import {
   sanitizeOrderByRole,
 } from './src/domain/rules.ts';
 import { runAcceptanceTests } from './src/domain/acceptanceTests.ts';
+import {
+  initDatabase,
+  getDbStatus,
+  dbGetProviders,
+  dbGetProviderById,
+  dbCreateProvider,
+  dbUpdateProvider,
+  dbDeleteProvider,
+  dbGetClients,
+  dbGetClientById,
+  dbGetCatalogConcepts,
+  dbGetCatalogConceptById,
+  dbCreateCatalogConcept,
+  dbUpdateCatalogConcept,
+  dbDeleteCatalogConcept,
+  dbGetOrders,
+  dbGetOrderById,
+  dbCreateOrder,
+  dbUpdateOrder,
+  dbResetData,
+} from './src/server/db.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -143,12 +165,6 @@ const SEED_CATALOG_CONCEPTS: CatalogConcept[] = [
   { id: 'cat-9', item: '', unidad: 'ST', descripcion: 'Certificado de Disposición Final', precioUnitario: 800.0 },
 ];
 
-// In-memory database store
-let providers: Provider[] = [...SEED_PROVIDERS];
-let clients: Client[] = [...SEED_CLIENTS];
-let catalogConcepts: CatalogConcept[] = [...SEED_CATALOG_CONCEPTS];
-let orders: Order[] = [];
-
 // Helper to create date relative to now in ISO
 function daysAgoIso(days: number): string {
   const d = new Date();
@@ -156,7 +172,7 @@ function daysAgoIso(days: number): string {
   return d.toISOString();
 }
 
-function initializeSeedOrders() {
+function getInitialSeedOrders(): Order[] {
   const ord1Items: ItemConcept[] = [
     { id: 'item-101', item: '', unidad: 'KG', descripcion: 'Solido contaminado', cantidad: 110.0, cantidadOrdenada: 110.0, precioUnitario: 12.0, importe: 1320.0 },
     { id: 'item-102', item: '', unidad: 'ST', descripcion: 'Flete lodos', cantidad: 1.0, cantidadOrdenada: 1.0, precioUnitario: 2500.0, importe: 2500.0 },
@@ -195,7 +211,7 @@ function initializeSeedOrders() {
   ];
   const ord6Totals = calculateOrderTotals(ord6Items, 3100.0);
 
-  orders = [
+  return [
     // 1. CREADO (sin proveedor, 2 días desde fechaOrden -> SLA Verde)
     {
       id: 'ORD-2026-001',
@@ -234,12 +250,12 @@ function initializeSeedOrders() {
           newStatus: 'CREADO',
           user: 'admin@logitrack.com',
           role: 'ADMIN',
-          comment: 'Orden registrada en espera de asignación de transportista.',
+          comment: 'Orden creada por administración sin proveedor inicial asignado.',
         },
       ],
     },
 
-    // 2. ASIGNANDO (asignado a prov-1 hace 7 días -> SLA Amarillo)
+    // 2. ASIGNANDO (asignado hace 7 días -> SLA Amarillo)
     {
       id: 'ORD-2026-002',
       folio: 'FOL-002',
@@ -405,7 +421,7 @@ function initializeSeedOrders() {
       createdAt: daysAgoIso(14),
       assignedAt: daysAgoIso(12),
       startedAt: daysAgoIso(11),
-      receptionRecordedAt: daysAgoIso(2),
+      receptionRecordedAt: daysAgoIso(3),
       manifestUploadedAt: daysAgoIso(1),
       manifestReviewedAt: daysAgoIso(2),
       invoicedAt: null,
@@ -413,19 +429,19 @@ function initializeSeedOrders() {
       manifiestos: [
         {
           version: 1,
-          fileName: 'manifiesto_bimbo_rec4401_v1.pdf',
-          fileSize: '820 KB',
+          fileName: 'manifiesto_bimbo_v1_ilegible.pdf',
+          fileSize: '890 KB',
           uploadedBy: 'chofer@tecolgicos.mx',
           uploadedAt: daysAgoIso(3),
           status: 'REJECTED',
+          rejectionReason: 'Firma de entrega del destinatario borrosa e ilegible.',
           reviewedBy: 'admin@logitrack.com',
           reviewedAt: daysAgoIso(2),
-          rejectionReason: 'Firma de recibido ilegible y falta sello de planta destino.',
           isCurrent: false,
         },
         {
           version: 2,
-          fileName: 'manifiesto_bimbo_rec4401_v2_sellado.pdf',
+          fileName: 'manifiesto_bimbo_v2_corregido.pdf',
           fileSize: '1.1 MB',
           uploadedBy: 'chofer@tecolgicos.mx',
           uploadedAt: daysAgoIso(1),
@@ -435,7 +451,7 @@ function initializeSeedOrders() {
       ],
       manifiestoActual: {
         version: 2,
-        fileName: 'manifiesto_bimbo_rec4401_v2_sellado.pdf',
+        fileName: 'manifiesto_bimbo_v2_corregido.pdf',
         fileSize: '1.1 MB',
         uploadedBy: 'chofer@tecolgicos.mx',
         uploadedAt: daysAgoIso(1),
@@ -450,7 +466,6 @@ function initializeSeedOrders() {
           newStatus: 'CREADO',
           user: 'admin@logitrack.com',
           role: 'ADMIN',
-          comment: 'Orden registrada.',
         },
         {
           id: 'h-402',
@@ -460,7 +475,7 @@ function initializeSeedOrders() {
           newStatus: 'ASIGNANDO',
           user: 'admin@logitrack.com',
           role: 'ADMIN',
-          comment: 'Asignado a Transportes Ecológicos.',
+          comment: 'Asignado a Transportes Ecológicos del Centro',
         },
         {
           id: 'h-403',
@@ -470,39 +485,45 @@ function initializeSeedOrders() {
           newStatus: 'EN_PROCESO',
           user: 'chofer@tecolgicos.mx',
           role: 'PROVIDER',
-          comment: 'Recolección en proceso.',
         },
         {
           id: 'h-404',
-          timestamp: daysAgoIso(2),
+          timestamp: daysAgoIso(3),
           action: 'REGISTRO_RECEPCION',
           prevStatus: 'EN_PROCESO',
           newStatus: 'COMPLETO',
           user: 'admin@logitrack.com',
           role: 'ADMIN',
-          comment: 'Número de recepción registrado: REC-2026-4401. Orden completada.',
+          comment: 'Recepción registrada: REC-2026-4401',
         },
         {
           id: 'h-405',
+          timestamp: daysAgoIso(3),
+          action: 'CARGA_MANIFIESTO',
+          user: 'chofer@tecolgicos.mx',
+          role: 'PROVIDER',
+          comment: 'Manifiesto versión 1 cargado.',
+        },
+        {
+          id: 'h-406',
           timestamp: daysAgoIso(2),
           action: 'RECHAZO_MANIFIESTO',
           user: 'admin@logitrack.com',
           role: 'ADMIN',
-          comment: 'Manifiesto v1 rechazado: Firma de recibido ilegible y falta sello de planta destino.',
+          comment: 'Manifiesto v1 RECHAZADO: Firma de entrega del destinatario borrosa e ilegible.',
         },
         {
-          id: 'h-406',
+          id: 'h-407',
           timestamp: daysAgoIso(1),
           action: 'CARGA_MANIFIESTO',
           user: 'chofer@tecolgicos.mx',
           role: 'PROVIDER',
-          comment: 'Subida nueva versión 2 con sello legible.',
-          details: { version: 2, fileName: 'manifiesto_bimbo_rec4401_v2_sellado.pdf' },
+          comment: 'Manifiesto versión 2 (corregido) cargado. Estado: PENDING.',
         },
       ],
     },
 
-    // 5. FACTURADO (recepción y factura registradas, manifiesto v1 PENDING -> espera aprobación para FINALIZAR)
+    // 5. FACTURADO (recepción + factura FAC-2026-9011 registrada, falta aprobar manifiesto)
     {
       id: 'ORD-2026-005',
       folio: 'FOL-005',
@@ -533,8 +554,8 @@ function initializeSeedOrders() {
       manifiestos: [
         {
           version: 1,
-          fileName: 'manifiesto_quimicos_femsa_v1.pdf',
-          fileSize: '950 KB',
+          fileName: 'manifiesto_femsa_aceites_v1.pdf',
+          fileSize: '1.3 MB',
           uploadedBy: 'bajio@recolecciones.com',
           uploadedAt: daysAgoIso(1),
           status: 'PENDING',
@@ -543,8 +564,8 @@ function initializeSeedOrders() {
       ],
       manifiestoActual: {
         version: 1,
-        fileName: 'manifiesto_quimicos_femsa_v1.pdf',
-        fileSize: '950 KB',
+        fileName: 'manifiesto_femsa_aceites_v1.pdf',
+        fileSize: '1.3 MB',
         uploadedBy: 'bajio@recolecciones.com',
         uploadedAt: daysAgoIso(1),
         status: 'PENDING',
@@ -636,7 +657,7 @@ function initializeSeedOrders() {
       manifestUploadedAt: daysAgoIso(3),
       manifestReviewedAt: daysAgoIso(2),
       invoicedAt: daysAgoIso(2),
-      finalizedAt: daysAgoIso(2), // Conserve elapsed time up to finalizedAt!
+      finalizedAt: daysAgoIso(2),
       manifiestos: [
         {
           version: 1,
@@ -723,13 +744,23 @@ function initializeSeedOrders() {
   ];
 }
 
-initializeSeedOrders();
-
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
   app.use(express.json({ limit: '15mb' }));
+
+  // Initialize PostgreSQL database with initial tables and benchmark seeds
+  try {
+    await initDatabase({
+      providers: SEED_PROVIDERS,
+      clients: SEED_CLIENTS,
+      catalogConcepts: SEED_CATALOG_CONCEPTS,
+      orders: getInitialSeedOrders(),
+    });
+  } catch (dbErr) {
+    console.error('[DB] Error inicializando base de datos PostgreSQL:', dbErr);
+  }
 
   // Helper for audit logging
   function addHistory(order: Order, entry: Omit<HistoryEntry, 'id' | 'timestamp'>) {
@@ -744,22 +775,42 @@ async function startServer() {
 
   // --- API ROUTES ---
 
-  // Health check
-  app.get('/api/health', (req: Request, res: Response) => {
-    res.json({ status: 'ok', service: 'LogiTrack MVP API' });
+  // Health check & DB Status
+  app.get('/api/health', async (req: Request, res: Response) => {
+    const dbStatus = await getDbStatus();
+    res.json({
+      status: 'ok',
+      service: 'LogiTrack MVP API',
+      database: dbStatus,
+    });
   });
 
   // Providers, Clients & Catalog concepts
-  app.get('/api/config', (req: Request, res: Response) => {
-    res.json({ providers, clients, catalogConcepts });
+  app.get('/api/config', async (req: Request, res: Response) => {
+    try {
+      const [providers, clients, catalogConcepts, dbStatus] = await Promise.all([
+        dbGetProviders(),
+        dbGetClients(),
+        dbGetCatalogConcepts(),
+        getDbStatus(),
+      ]);
+      res.json({ providers, clients, catalogConcepts, database: dbStatus });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al obtener configuración', details: err.message });
+    }
   });
 
   // --- CRUD PROVEEDORES ---
-  app.get('/api/providers', (req: Request, res: Response) => {
-    res.json(providers);
+  app.get('/api/providers', async (req: Request, res: Response) => {
+    try {
+      const providers = await dbGetProviders();
+      res.json(providers);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al obtener transportistas', details: err.message });
+    }
   });
 
-  app.post('/api/providers', (req: Request, res: Response) => {
+  app.post('/api/providers', async (req: Request, res: Response) => {
     const { nombre, rfc, telefono, email, activo, direccion, autorizacionDocumento } = req.body;
     if (!nombre || String(nombre).trim().length === 0) {
       return res.status(400).json({ error: 'El nombre o razón social del transportista es obligatorio' });
@@ -768,670 +819,577 @@ async function startServer() {
       return res.status(400).json({ error: 'El RFC del proveedor es obligatorio' });
     }
 
-    // Regla 4: No puede haber 2 proveedores con el mismo RFC ya que es único
-    const normalizedRfc = String(rfc).trim().toUpperCase();
-    const duplicate = providers.find(p => p.rfc.toUpperCase() === normalizedRfc);
-    if (duplicate) {
-      return res.status(400).json({
-        error: `Ya existe un transportista registrado con el RFC "${normalizedRfc}" (${duplicate.nombre}). El RFC debe ser único en el sistema.`,
-      });
-    }
-
-    const newProvider: Provider = {
-      id: `prov-${Date.now()}`,
-      nombre: String(nombre).trim(),
-      rfc: normalizedRfc,
-      telefono: String(telefono || '').trim(),
-      email: String(email || '').trim(),
-      activo: activo !== false,
-      direccion: direccion
-        ? {
-            calleNumero: String(direccion.calleNumero || '').trim(),
-            colonia: direccion.colonia ? String(direccion.colonia).trim() : undefined,
-            ciudad: String(direccion.ciudad || '').trim(),
-            estado: String(direccion.estado || '').trim(),
-            codigoPostal: String(direccion.codigoPostal || '').trim(),
-          }
-        : undefined,
-      autorizacionDocumento: autorizacionDocumento
-        ? {
-            fileName: String(autorizacionDocumento.fileName || 'autorizacion.pdf'),
-            fileType: autorizacionDocumento.fileType || 'application/pdf',
-            fileDataUrl: autorizacionDocumento.fileDataUrl,
-            uploadedAt: autorizacionDocumento.uploadedAt || new Date().toISOString(),
-          }
-        : undefined,
-    };
-
-    providers.push(newProvider);
-    res.status(201).json(newProvider);
-  });
-
-  app.put('/api/providers/:id', (req: Request, res: Response) => {
-    const provider = providers.find(p => p.id === req.params.id);
-    if (!provider) {
-      return res.status(404).json({ error: 'Transportista no encontrado' });
-    }
-
-    const { nombre, rfc, telefono, email, activo, direccion, autorizacionDocumento } = req.body;
-
-    // Regla 4: No puede haber 2 proveedores con el mismo RFC
-    if (rfc !== undefined) {
+    try {
+      // Regla 4: No puede haber 2 proveedores con el mismo RFC ya que es único
       const normalizedRfc = String(rfc).trim().toUpperCase();
-      const duplicate = providers.find(
-        p => p.id !== req.params.id && p.rfc.toUpperCase() === normalizedRfc
-      );
+      const currentProviders = await dbGetProviders();
+      const duplicate = currentProviders.find(p => p.rfc.toUpperCase() === normalizedRfc);
       if (duplicate) {
         return res.status(400).json({
-          error: `El RFC "${normalizedRfc}" ya está asignado al transportista "${duplicate.nombre}". El RFC debe ser único en el sistema.`,
+          error: `Ya existe un transportista registrado con el RFC "${normalizedRfc}" (${duplicate.nombre}). El RFC debe ser único en el sistema.`,
         });
       }
-      provider.rfc = normalizedRfc;
-    }
 
-    if (nombre !== undefined) provider.nombre = String(nombre).trim();
-    if (telefono !== undefined) provider.telefono = String(telefono).trim();
-    if (email !== undefined) provider.email = String(email).trim();
-    if (activo !== undefined) provider.activo = Boolean(activo);
-    if (direccion !== undefined) {
-      provider.direccion = {
-        calleNumero: String(direccion.calleNumero || '').trim(),
-        colonia: direccion.colonia ? String(direccion.colonia).trim() : undefined,
-        ciudad: String(direccion.ciudad || '').trim(),
-        estado: String(direccion.estado || '').trim(),
-        codigoPostal: String(direccion.codigoPostal || '').trim(),
+      const newProvider: Provider = {
+        id: `prov-${Date.now()}`,
+        nombre: String(nombre).trim(),
+        rfc: normalizedRfc,
+        telefono: String(telefono || '').trim(),
+        email: String(email || '').trim(),
+        activo: activo !== false,
+        direccion: direccion
+          ? {
+              calleNumero: String(direccion.calleNumero || '').trim(),
+              colonia: direccion.colonia ? String(direccion.colonia).trim() : undefined,
+              ciudad: String(direccion.ciudad || '').trim(),
+              estado: String(direccion.estado || '').trim(),
+              codigoPostal: String(direccion.codigoPostal || '').trim(),
+            }
+          : undefined,
+        autorizacionDocumento: autorizacionDocumento
+          ? {
+              fileName: String(autorizacionDocumento.fileName || 'autorizacion.pdf'),
+              fileType: autorizacionDocumento.fileType || 'application/pdf',
+              fileDataUrl: autorizacionDocumento.fileDataUrl,
+              uploadedAt: autorizacionDocumento.uploadedAt || new Date().toISOString(),
+            }
+          : undefined,
       };
-    }
-    if (autorizacionDocumento !== undefined) {
-      provider.autorizacionDocumento = autorizacionDocumento;
-    }
 
-    // Actualizar nombre en órdenes asignadas si cambió
-    if (nombre) {
-      orders.forEach(o => {
-        if (o.proveedorId === provider.id) {
-          o.proveedorNombre = provider.nombre;
-        }
-      });
+      const created = await dbCreateProvider(newProvider);
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al registrar transportista en la base de datos', details: err.message });
     }
-
-    res.json(provider);
   });
 
-  app.delete('/api/providers/:id', (req: Request, res: Response) => {
-    const index = providers.findIndex(p => p.id === req.params.id);
-    if (index === -1) {
-      return res.status(404).json({ error: 'Transportista no encontrado' });
+  app.put('/api/providers/:id', async (req: Request, res: Response) => {
+    try {
+      const provider = await dbGetProviderById(req.params.id);
+      if (!provider) {
+        return res.status(404).json({ error: 'Transportista no encontrado' });
+      }
+
+      const { nombre, rfc, telefono, email, activo, direccion, autorizacionDocumento } = req.body;
+
+      // Regla 4: No puede haber 2 proveedores con el mismo RFC
+      if (rfc !== undefined) {
+        const normalizedRfc = String(rfc).trim().toUpperCase();
+        const currentProviders = await dbGetProviders();
+        const duplicate = currentProviders.find(
+          p => p.id !== req.params.id && p.rfc.toUpperCase() === normalizedRfc
+        );
+        if (duplicate) {
+          return res.status(400).json({
+            error: `El RFC "${normalizedRfc}" ya está asignado al transportista "${duplicate.nombre}". El RFC debe ser único en el sistema.`,
+          });
+        }
+        provider.rfc = normalizedRfc;
+      }
+
+      if (nombre !== undefined) provider.nombre = String(nombre).trim();
+      if (telefono !== undefined) provider.telefono = String(telefono).trim();
+      if (email !== undefined) provider.email = String(email).trim();
+      if (activo !== undefined) provider.activo = Boolean(activo);
+      if (direccion !== undefined) {
+        provider.direccion = {
+          calleNumero: String(direccion.calleNumero || '').trim(),
+          colonia: direccion.colonia ? String(direccion.colonia).trim() : undefined,
+          ciudad: String(direccion.ciudad || '').trim(),
+          estado: String(direccion.estado || '').trim(),
+          codigoPostal: String(direccion.codigoPostal || '').trim(),
+        };
+      }
+      if (autorizacionDocumento !== undefined) {
+        provider.autorizacionDocumento = autorizacionDocumento;
+      }
+
+      const updated = await dbUpdateProvider(req.params.id, provider);
+
+      // Actualizar nombre en órdenes asignadas si cambió
+      if (nombre) {
+        const orders = await dbGetOrders();
+        for (const o of orders) {
+          if (o.proveedorId === provider.id) {
+            o.proveedorNombre = provider.nombre;
+            await dbUpdateOrder(o);
+          }
+        }
+      }
+
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al actualizar transportista', details: err.message });
     }
+  });
 
-    const providerId = req.params.id;
-    const activeAssignedOrders = orders.filter(
-      o => o.proveedorId === providerId && o.estado !== 'FINALIZADO'
-    );
+  app.delete('/api/providers/:id', async (req: Request, res: Response) => {
+    try {
+      const provider = await dbGetProviderById(req.params.id);
+      if (!provider) {
+        return res.status(404).json({ error: 'Transportista no encontrado' });
+      }
 
-    if (activeAssignedOrders.length > 0) {
-      return res.status(400).json({
-        error: `No es posible eliminar a ${providers[index].nombre} porque tiene ${activeAssignedOrders.length} orden(es) activas asignadas. En su lugar, desactive al proveedor para pausar nuevas asignaciones.`,
-      });
+      const providerId = req.params.id;
+      const orders = await dbGetOrders();
+      const activeAssignedOrders = orders.filter(
+        o => o.proveedorId === providerId && o.estado !== 'FINALIZADO'
+      );
+
+      if (activeAssignedOrders.length > 0) {
+        return res.status(400).json({
+          error: `No es posible eliminar a ${provider.nombre} porque tiene ${activeAssignedOrders.length} orden(es) activas asignadas. En su lugar, desactive al proveedor para pausar nuevas asignaciones.`,
+        });
+      }
+
+      await dbDeleteProvider(providerId);
+      res.json({ message: 'Transportista eliminado exitosamente', deleted: provider });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al eliminar transportista', details: err.message });
     }
-
-    const deleted = providers.splice(index, 1)[0];
-    res.json({ message: 'Transportista eliminado exitosamente', deleted });
   });
 
   // --- CRUD CATALOGO DE CONCEPTOS ---
-  app.get('/api/catalog-concepts', (req: Request, res: Response) => {
-    res.json(catalogConcepts);
+  app.get('/api/catalog-concepts', async (req: Request, res: Response) => {
+    try {
+      const concepts = await dbGetCatalogConcepts();
+      res.json(concepts);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al obtener conceptos', details: err.message });
+    }
   });
 
-  app.post('/api/catalog-concepts', (req: Request, res: Response) => {
+  app.post('/api/catalog-concepts', async (req: Request, res: Response) => {
     const { item, unidad, descripcion, precioUnitario } = req.body;
     // Regla 1: ITEM opcional, DESCRIPCION obligatoria
     if (!descripcion || String(descripcion).trim().length === 0) {
       return res.status(400).json({ error: 'La descripción del concepto es obligatoria' });
     }
 
-    const unitPrice = Number(precioUnitario) || 0;
-    const newConcept: CatalogConcept = {
-      id: `cat-${Date.now()}`,
-      item: item ? String(item).trim() : '',
-      unidad: String(unidad || 'ST').trim().toUpperCase(),
-      descripcion: String(descripcion).trim(),
-      precioUnitario: unitPrice,
-    };
+    try {
+      const unitPrice = Number(precioUnitario) || 0;
+      const newConcept: CatalogConcept = {
+        id: `cat-${Date.now()}`,
+        item: item ? String(item).trim() : '',
+        unidad: String(unidad || 'ST').trim().toUpperCase(),
+        descripcion: String(descripcion).trim(),
+        precioUnitario: unitPrice,
+      };
 
-    catalogConcepts.push(newConcept);
-    res.status(201).json(newConcept);
+      const created = await dbCreateCatalogConcept(newConcept);
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al registrar concepto', details: err.message });
+    }
   });
 
-  app.put('/api/catalog-concepts/:id', (req: Request, res: Response) => {
-    const concept = catalogConcepts.find(c => c.id === req.params.id);
-    if (!concept) {
-      return res.status(404).json({ error: 'Concepto no encontrado en el catálogo' });
-    }
-
-    const { item, unidad, descripcion, precioUnitario } = req.body;
-    if (descripcion !== undefined) {
-      if (!descripcion || String(descripcion).trim().length === 0) {
-        return res.status(400).json({ error: 'La descripción del concepto es obligatoria' });
+  app.put('/api/catalog-concepts/:id', async (req: Request, res: Response) => {
+    try {
+      const concept = await dbGetCatalogConceptById(req.params.id);
+      if (!concept) {
+        return res.status(404).json({ error: 'Concepto no encontrado en el catálogo' });
       }
-      concept.descripcion = String(descripcion).trim();
-    }
-    if (item !== undefined) concept.item = String(item).trim();
-    if (unidad !== undefined) concept.unidad = String(unidad).trim().toUpperCase();
-    if (precioUnitario !== undefined) concept.precioUnitario = Number(precioUnitario) || 0;
 
-    res.json(concept);
+      const { item, unidad, descripcion, precioUnitario } = req.body;
+      if (descripcion !== undefined) {
+        if (!descripcion || String(descripcion).trim().length === 0) {
+          return res.status(400).json({ error: 'La descripción del concepto es obligatoria' });
+        }
+        concept.descripcion = String(descripcion).trim();
+      }
+      if (item !== undefined) concept.item = String(item).trim();
+      if (unidad !== undefined) concept.unidad = String(unidad).trim().toUpperCase();
+      if (precioUnitario !== undefined) concept.precioUnitario = Number(precioUnitario) || 0;
+
+      const updated = await dbUpdateCatalogConcept(req.params.id, concept);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al actualizar concepto', details: err.message });
+    }
   });
 
-  app.delete('/api/catalog-concepts/:id', (req: Request, res: Response) => {
-    const index = catalogConcepts.findIndex(c => c.id === req.params.id);
-    if (index === -1) {
-      return res.status(404).json({ error: 'Concepto no encontrado en el catálogo' });
+  app.delete('/api/catalog-concepts/:id', async (req: Request, res: Response) => {
+    try {
+      const concept = await dbGetCatalogConceptById(req.params.id);
+      if (!concept) {
+        return res.status(404).json({ error: 'Concepto no encontrado en el catálogo' });
+      }
+      await dbDeleteCatalogConcept(req.params.id);
+      res.json({ message: 'Concepto eliminado del catálogo', deleted: concept });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al eliminar concepto', details: err.message });
     }
-    const deleted = catalogConcepts.splice(index, 1)[0];
-    res.json({ message: 'Concepto eliminado del catálogo', deleted });
   });
 
   // Get orders (sanitized by role)
-  app.get('/api/orders', (req: Request, res: Response) => {
-    const role = (req.query.role as Role) || 'ADMIN';
-    const entityId = req.query.entityId as string;
+  app.get('/api/orders', async (req: Request, res: Response) => {
+    try {
+      const role = (req.query.role as Role) || 'ADMIN';
+      const entityId = req.query.entityId as string;
 
-    const sanitizedList = orders
-      .map(o => sanitizeOrderByRole(o, role, entityId))
-      .filter((o): o is Order => o !== null);
+      const allOrders = await dbGetOrders();
+      const sanitizedList = allOrders
+        .map(o => sanitizeOrderByRole(o, role, entityId))
+        .filter((o): o is Order => o !== null);
 
-    res.json(sanitizedList);
+      res.json(sanitizedList);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al obtener órdenes', details: err.message });
+    }
   });
 
   // Get single order
-  app.get('/api/orders/:id', (req: Request, res: Response) => {
-    const order = orders.find(o => o.id === req.params.id);
-    if (!order) {
-      return res.status(404).json({ error: 'Orden no encontrada' });
-    }
-    const role = (req.query.role as Role) || 'ADMIN';
-    const entityId = req.query.entityId as string;
+  app.get('/api/orders/:id', async (req: Request, res: Response) => {
+    try {
+      const order = await dbGetOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: 'Orden no encontrada' });
+      }
+      const role = (req.query.role as Role) || 'ADMIN';
+      const entityId = req.query.entityId as string;
 
-    const sanitized = sanitizeOrderByRole(order, role, entityId);
-    if (!sanitized) {
-      return res.status(403).json({ error: 'Acceso no autorizado a esta orden' });
+      const sanitized = sanitizeOrderByRole(order, role, entityId);
+      if (!sanitized) {
+        return res.status(403).json({ error: 'Acceso no autorizado a esta orden' });
+      }
+      res.json(sanitized);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al obtener orden', details: err.message });
     }
-    res.json(sanitized);
   });
 
   // Create order (Admin only)
-  // Regla: Una orden puede crearse sin proveedor y permanecer en CREADO.
-  // Calcular todos los importes en el servidor con Decimal.
-  app.post('/api/orders', (req: Request, res: Response) => {
-    const { clienteId, conceptos, proveedorId, costoProveedor, user } = req.body;
+  app.post('/api/orders', async (req: Request, res: Response) => {
+    try {
+      const { clienteId, conceptos, proveedorId, costoProveedor, user } = req.body;
 
-    if (!clienteId) {
-      return res.status(400).json({ error: 'El cliente es requerido' });
-    }
-    const client = clients.find(c => c.id === clienteId);
-    if (!client) {
-      return res.status(400).json({ error: 'Cliente inválido' });
-    }
+      if (!clienteId) {
+        return res.status(400).json({ error: 'El cliente es requerido' });
+      }
+      const client = await dbGetClientById(clienteId);
+      if (!client) {
+        return res.status(400).json({ error: 'Cliente inválido' });
+      }
 
-    if (!conceptos || !Array.isArray(conceptos) || conceptos.length === 0) {
-      return res.status(400).json({ error: 'Se requiere al menos un concepto en la orden' });
-    }
+      if (!conceptos || !Array.isArray(conceptos) || conceptos.length === 0) {
+        return res.status(400).json({ error: 'Se requiere al menos un concepto en la orden' });
+      }
 
-    // Validar que cada concepto tenga descripción obligatoria
-    if (conceptos.some((c: any) => !c.descripcion || String(c.descripcion).trim().length === 0)) {
-      return res.status(400).json({ error: 'La descripción es obligatoria para cada concepto de la orden' });
-    }
+      // Validar que cada concepto tenga descripción obligatoria
+      if (conceptos.some((c: any) => !c.descripcion || String(c.descripcion).trim().length === 0)) {
+        return res.status(400).json({ error: 'La descripción es obligatoria para cada concepto de la orden' });
+      }
 
-    // Calcular importes de conceptos estrictamente con Decimal en el servidor
-    const sanitizedConceptos: ItemConcept[] = conceptos.map((c: any, idx: number) => {
-      const cantidad = Number(c.cantidadOrdenada ?? c.cantidad ?? 1);
-      const precioUnitario = Number(c.precioUnitario) || 0;
-      const importe = calculateItemImporte(cantidad, precioUnitario);
-      return {
-        id: c.id || `item-${Date.now()}-${idx}`,
-        item: c.item ? String(c.item).trim() : '',
-        unidad: String(c.unidad || 'ST').trim().toUpperCase(),
-        descripcion: String(c.descripcion).trim(),
-        cantidad,
-        cantidadOrdenada: cantidad,
-        precioUnitario,
-        importe,
+      // Calcular importes de conceptos estrictamente con Decimal en el servidor
+      const sanitizedConceptos: ItemConcept[] = conceptos.map((c: any, idx: number) => {
+        const cantidad = Number(c.cantidadOrdenada ?? c.cantidad ?? 1);
+        const precioUnitario = Number(c.precioUnitario) || 0;
+        const importe = calculateItemImporte(cantidad, precioUnitario);
+        return {
+          id: c.id || `item-${Date.now()}-${idx}`,
+          item: c.item ? String(c.item).trim() : '',
+          unidad: String(c.unidad || 'ST').trim().toUpperCase(),
+          descripcion: String(c.descripcion).trim(),
+          cantidad,
+          cantidadOrdenada: cantidad,
+          precioUnitario,
+          importe,
+        };
+      });
+
+      // Validar asignación opcional de proveedor inicial
+      let assignedProv: Provider | null = null;
+      let provCostNumber: number | null = null;
+      let initialStatus: OrderStatus = 'CREADO';
+      let assignedAt: string | null = null;
+
+      if (proveedorId) {
+        const prov = await dbGetProviderById(proveedorId);
+        if (!prov || !prov.activo) {
+          return res.status(400).json({ error: 'El proveedor seleccionado no existe o no está activo' });
+        }
+        assignedProv = prov;
+        if (costoProveedor === undefined || costoProveedor === null || Number(costoProveedor) < 0) {
+          return res.status(400).json({ error: 'Debe especificar un costo de proveedor válido (mayor o igual a cero)' });
+        }
+        provCostNumber = new Decimal(costoProveedor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+        // Iniciar inmediatamente en EN_PROCESO para cronometraje exacto
+        initialStatus = 'EN_PROCESO';
+        assignedAt = new Date().toISOString();
+      }
+
+      const totals = calculateOrderTotals(sanitizedConceptos, provCostNumber);
+
+      const allOrders = await dbGetOrders();
+      const newOrderNumber = allOrders.length + 1;
+      const newFolio = `FOL-${String(newOrderNumber).padStart(3, '0')}`;
+      const newId = `ORD-2026-${String(newOrderNumber).padStart(3, '0')}`;
+      const nowIso = new Date().toISOString();
+
+      const newOrder: Order = {
+        id: newId,
+        folio: newFolio,
+        clienteId: client.id,
+        clienteNombre: client.nombre,
+        proveedorId: assignedProv ? assignedProv.id : null,
+        proveedorNombre: assignedProv ? assignedProv.nombre : null,
+        fechaOrden: nowIso,
+        conceptos: sanitizedConceptos,
+        subtotalCliente: totals.subtotalCliente,
+        costoTotalCliente: totals.costoTotalCliente,
+        costoProveedor: totals.costoProveedor,
+        utilidadEstimada: totals.utilidadEstimada,
+        estado: initialStatus,
+        numeroRecepcion: null,
+        recepcionRegistradaPor: null,
+        numeroFacturacion: null,
+        facturacionRegistradaPor: null,
+        facturacionPendiente: null,
+        createdAt: nowIso,
+        assignedAt,
+        startedAt: assignedProv ? assignedAt : null,
+        receptionRecordedAt: null,
+        manifestUploadedAt: null,
+        manifestReviewedAt: null,
+        invoicedAt: null,
+        finalizedAt: null,
+        manifiestos: [],
+        manifiestoActual: null,
+        historial: [],
       };
-    });
 
-    // Validar asignación opcional de proveedor inicial
-    let assignedProv: Provider | null = null;
-    let provCostNumber: number | null = null;
-    let initialStatus: OrderStatus = 'CREADO';
-    let assignedAt: string | null = null;
-
-    if (proveedorId) {
-      assignedProv = providers.find(p => p.id === proveedorId && p.activo) || null;
-      if (!assignedProv) {
-        return res.status(400).json({ error: 'El proveedor seleccionado no existe o no está activo' });
-      }
-      if (costoProveedor === undefined || costoProveedor === null || Number(costoProveedor) < 0) {
-        return res.status(400).json({ error: 'Debe especificar un costo de proveedor válido (mayor o igual a cero)' });
-      }
-      provCostNumber = new Decimal(costoProveedor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
-      // Al agregar un proveedor a la orden se inicia inmediatamente en EN_PROCESO para cronometrar y llevar el tiempo de la orden correctamente
-      initialStatus = 'EN_PROCESO';
-      assignedAt = new Date().toISOString();
-    }
-
-    const totals = calculateOrderTotals(sanitizedConceptos, provCostNumber);
-
-    const newOrderNumber = orders.length + 1;
-    const newFolio = `FOL-${String(newOrderNumber).padStart(3, '0')}`;
-    const newId = `ORD-2026-${String(newOrderNumber).padStart(3, '0')}`;
-    const nowIso = new Date().toISOString();
-
-    const newOrder: Order = {
-      id: newId,
-      folio: newFolio,
-      clienteId: client.id,
-      clienteNombre: client.nombre,
-      proveedorId: assignedProv ? assignedProv.id : null,
-      proveedorNombre: assignedProv ? assignedProv.nombre : null,
-      fechaOrden: nowIso,
-      conceptos: sanitizedConceptos,
-      subtotalCliente: totals.subtotalCliente,
-      costoTotalCliente: totals.costoTotalCliente,
-      costoProveedor: totals.costoProveedor,
-      utilidadEstimada: totals.utilidadEstimada,
-      estado: initialStatus,
-      numeroRecepcion: null,
-      recepcionRegistradaPor: null,
-      numeroFacturacion: null,
-      facturacionRegistradaPor: null,
-      facturacionPendiente: null,
-      createdAt: nowIso,
-      assignedAt,
-      startedAt: assignedProv ? assignedAt : null,
-      receptionRecordedAt: null,
-      manifestUploadedAt: null,
-      manifestReviewedAt: null,
-      invoicedAt: null,
-      finalizedAt: null,
-      manifiestos: [],
-      manifiestoActual: null,
-      historial: [],
-    };
-
-    // Historial inicial
-    addHistory(newOrder, {
-      action: 'CREACION_ORDEN',
-      newStatus: initialStatus,
-      user: user || 'admin@logitrack.com',
-      role: 'ADMIN',
-      comment: assignedProv
-        ? `Orden creada con proveedor ${assignedProv.nombre} asignado; recolección iniciada inmediatamente en EN_PROCESO.`
-        : 'Orden creada sin proveedor asignado en estado CREADO.',
-    });
-
-    if (assignedProv) {
+      // Historial inicial
       addHistory(newOrder, {
-        action: 'ASIGNACION_PROVEEDOR',
-        prevStatus: 'CREADO',
-        newStatus: 'EN_PROCESO',
+        action: 'CREACION_ORDEN',
+        newStatus: initialStatus,
         user: user || 'admin@logitrack.com',
         role: 'ADMIN',
-        comment: `Proveedor asignado: ${assignedProv.nombre}. Costo: $${provCostNumber?.toFixed(2)} MXN. Orden iniciada inmediatamente en EN_PROCESO para cronometraje.`,
-        details: { proveedorId: assignedProv.id, costoProveedor: provCostNumber },
+        comment: assignedProv
+          ? `Orden creada con proveedor ${assignedProv.nombre} asignado; recolección iniciada inmediatamente en EN_PROCESO.`
+          : 'Orden creada sin proveedor asignado en estado CREADO.',
       });
-    }
 
-    orders.unshift(newOrder);
-    res.status(201).json(newOrder);
+      if (assignedProv) {
+        addHistory(newOrder, {
+          action: 'ASIGNACION_PROVEEDOR',
+          prevStatus: 'CREADO',
+          newStatus: 'EN_PROCESO',
+          user: user || 'admin@logitrack.com',
+          role: 'ADMIN',
+          comment: `Proveedor asignado: ${assignedProv.nombre}. Costo: $${provCostNumber?.toFixed(2)} MXN. Orden iniciada inmediatamente en EN_PROCESO para cronometraje.`,
+          details: { proveedorId: assignedProv.id, costoProveedor: provCostNumber },
+        });
+      }
+
+      const created = await dbCreateOrder(newOrder);
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al registrar orden en la base de datos', details: err.message });
+    }
   });
 
   // Assign or reassign provider (Admin only)
-  // Regla: Exactamente un proveedor por orden.
-  // Proveedor activo + costoProveedor -> assignedAt -> ASIGNANDO.
-  // Reasignación conserva proveedor anterior, nuevo, usuario y fecha en historial.
-  // Proveedor nunca puede asignarse a sí mismo.
-  app.post('/api/orders/:id/assign-provider', (req: Request, res: Response) => {
-    const order = orders.find(o => o.id === req.params.id);
-    if (!order) {
-      return res.status(404).json({ error: 'Orden no encontrada' });
-    }
-
-    const { providerId, costoProveedor, user, role } = req.body;
-
-    if (role === 'PROVIDER') {
-      return res.status(403).json({ error: 'Un proveedor nunca puede asignarse órdenes a sí mismo' });
-    }
-
-    if (!providerId) {
-      return res.status(400).json({ error: 'Debe seleccionar un proveedor' });
-    }
-
-    const provider = providers.find(p => p.id === providerId);
-    if (!provider) {
-      return res.status(400).json({ error: 'Proveedor no encontrado' });
-    }
-    if (!provider.activo) {
-      return res.status(400).json({ error: 'No se puede asignar un proveedor inactivo' });
-    }
-
-    if (costoProveedor === undefined || costoProveedor === null || Number(costoProveedor) < 0) {
-      return res.status(400).json({ error: 'Debe ingresar un costo de proveedor válido (mayor o igual a cero)' });
-    }
-
-    const prevProvId = order.proveedorId;
-    const prevProvName = order.proveedorNombre;
-    const isReassignment = Boolean(prevProvId && prevProvId !== provider.id);
-
-    const costNum = new Decimal(costoProveedor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
-    order.costoProveedor = costNum;
-
-    // Recalcular utilidad con Decimal
-    const totals = calculateOrderTotals(order.conceptos, costNum);
-    order.utilidadEstimada = totals.utilidadEstimada;
-
-    order.proveedorId = provider.id;
-    order.proveedorNombre = provider.nombre;
-    const nowIso = new Date().toISOString();
-    order.assignedAt = nowIso;
-
-    const prevStatus = order.estado;
-    // Al asignar proveedor se inicia inmediatamente la orden en EN_PROCESO para llevar el tiempo de forma correcta
-    if (order.estado === 'CREADO' || order.estado === 'ASIGNANDO') {
-      order.estado = 'EN_PROCESO';
-      if (!order.startedAt) {
-        order.startedAt = nowIso;
+  app.post('/api/orders/:id/assign-provider', async (req: Request, res: Response) => {
+    try {
+      const order = await dbGetOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: 'Orden no encontrada' });
       }
-    }
 
-    if (isReassignment) {
-      addHistory(order, {
-        action: 'REASIGNACION_PROVEEDOR',
-        prevStatus,
-        newStatus: order.estado,
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
-        comment: `Reasignación de transportista: de '${prevProvName}' a '${provider.nombre}'. Costo registrado: $${costNum.toFixed(2)} MXN. Orden activa en EN_PROCESO.`,
-        details: {
-          proveedorAnteriorId: prevProvId,
-          proveedorAnterior: prevProvName,
-          proveedorNuevoId: provider.id,
-          proveedorNuevo: provider.nombre,
-          costoProveedor: costNum,
-        },
-      });
-    } else {
-      addHistory(order, {
-        action: 'ASIGNACION_PROVEEDOR',
-        prevStatus,
-        newStatus: order.estado,
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
-        comment: `Proveedor asignado: '${provider.nombre}'. Costo: $${costNum.toFixed(2)} MXN. Orden iniciada inmediatamente en EN_PROCESO para cronometraje exacto.`,
-        details: {
-          proveedorId: provider.id,
-          proveedorNombre: provider.nombre,
-          costoProveedor: costNum,
-        },
-      });
-    }
+      const { providerId, costoProveedor, user, role } = req.body;
 
-    res.json(order);
+      if (role === 'PROVIDER') {
+        return res.status(403).json({ error: 'Un proveedor nunca puede asignarse órdenes a sí mismo' });
+      }
+
+      if (!providerId) {
+        return res.status(400).json({ error: 'Debe seleccionar un proveedor' });
+      }
+
+      const provider = await dbGetProviderById(providerId);
+      if (!provider) {
+        return res.status(400).json({ error: 'Proveedor no encontrado' });
+      }
+      if (!provider.activo) {
+        return res.status(400).json({ error: 'No se puede asignar un proveedor inactivo' });
+      }
+
+      if (costoProveedor === undefined || costoProveedor === null || Number(costoProveedor) < 0) {
+        return res.status(400).json({ error: 'Debe ingresar un costo de proveedor válido (mayor o igual a cero)' });
+      }
+
+      const prevProvId = order.proveedorId;
+      const prevProvName = order.proveedorNombre;
+      const isReassignment = Boolean(prevProvId && prevProvId !== provider.id);
+
+      const costNum = new Decimal(costoProveedor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+      order.costoProveedor = costNum;
+
+      // Recalcular utilidad con Decimal
+      const totals = calculateOrderTotals(order.conceptos, costNum);
+      order.utilidadEstimada = totals.utilidadEstimada;
+
+      order.proveedorId = provider.id;
+      order.proveedorNombre = provider.nombre;
+      const nowIso = new Date().toISOString();
+      order.assignedAt = nowIso;
+
+      const prevStatus = order.estado;
+      // Iniciar inmediatamente en EN_PROCESO
+      if (order.estado === 'CREADO' || order.estado === 'ASIGNANDO') {
+        order.estado = 'EN_PROCESO';
+        if (!order.startedAt) {
+          order.startedAt = nowIso;
+        }
+      }
+
+      if (isReassignment) {
+        addHistory(order, {
+          action: 'REASIGNACION_PROVEEDOR',
+          prevStatus,
+          newStatus: order.estado,
+          user: user || 'admin@logitrack.com',
+          role: 'ADMIN',
+          comment: `Reasignación de transportista: de '${prevProvName}' a '${provider.nombre}'. Costo registrado: $${costNum.toFixed(2)} MXN. Orden activa en EN_PROCESO.`,
+          details: {
+            proveedorAnteriorId: prevProvId,
+            proveedorAnterior: prevProvName,
+            proveedorNuevoId: provider.id,
+            proveedorNuevo: provider.nombre,
+            costoProveedor: costNum,
+          },
+        });
+      } else {
+        addHistory(order, {
+          action: 'ASIGNACION_PROVEEDOR',
+          prevStatus,
+          newStatus: order.estado,
+          user: user || 'admin@logitrack.com',
+          role: 'ADMIN',
+          comment: `Proveedor asignado: '${provider.nombre}'. Costo: $${costNum.toFixed(2)} MXN. Orden iniciada inmediatamente en EN_PROCESO para cronometraje exacto.`,
+          details: {
+            proveedorId: provider.id,
+            proveedorNombre: provider.nombre,
+            costoProveedor: costNum,
+          },
+        });
+      }
+
+      const updated = await dbUpdateOrder(order);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al asignar transportista', details: err.message });
+    }
   });
 
   // Start process (Provider only)
-  // Regla: ASIGNANDO -> EN_PROCESO cuando el proveedor indica recolección en proceso.
-  app.post('/api/orders/:id/start-process', (req: Request, res: Response) => {
-    const order = orders.find(o => o.id === req.params.id);
-    if (!order) {
-      return res.status(404).json({ error: 'Orden no encontrada' });
+  app.post('/api/orders/:id/start-process', async (req: Request, res: Response) => {
+    try {
+      const order = await dbGetOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: 'Orden no encontrada' });
+      }
+
+      const { user, providerId } = req.body;
+      if (providerId && order.proveedorId !== providerId) {
+        return res.status(403).json({ error: 'Solo el proveedor asignado puede iniciar esta recolección' });
+      }
+
+      if (order.estado !== 'ASIGNANDO') {
+        return res.status(400).json({ error: `La orden se encuentra en estado ${order.estado}, no puede iniciarse recolección` });
+      }
+
+      const prevStatus = order.estado;
+      order.estado = 'EN_PROCESO';
+      const nowIso = new Date().toISOString();
+      order.startedAt = nowIso;
+
+      addHistory(order, {
+        action: 'INICIO_RECOLECCION',
+        prevStatus,
+        newStatus: 'EN_PROCESO',
+        user: user || order.proveedorNombre || 'Proveedor',
+        role: 'PROVIDER',
+        comment: 'El proveedor asignado ha iniciado el servicio de recolección en ruta.',
+      });
+
+      const updated = await dbUpdateOrder(order);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al iniciar recolección', details: err.message });
     }
-
-    const { user, providerId } = req.body;
-    if (providerId && order.proveedorId !== providerId) {
-      return res.status(403).json({ error: 'Solo el proveedor asignado puede iniciar esta recolección' });
-    }
-
-    if (order.estado !== 'ASIGNANDO') {
-      return res.status(400).json({ error: `La orden se encuentra en estado ${order.estado}, no puede iniciarse recolección` });
-    }
-
-    const prevStatus = order.estado;
-    order.estado = 'EN_PROCESO';
-    const nowIso = new Date().toISOString();
-    order.startedAt = nowIso;
-
-    addHistory(order, {
-      action: 'INICIO_RECOLECCION',
-      prevStatus,
-      newStatus: 'EN_PROCESO',
-      user: user || order.proveedorNombre || 'Proveedor',
-      role: 'PROVIDER',
-      comment: 'El proveedor asignado ha iniciado el servicio de recolección en ruta.',
-    });
-
-    res.json(order);
   });
 
   // Record reception number (Admin only)
-  // Regla:
-  // - No permitir completar una orden que no tenga un proveedor asignado.
-  // - Guardar numeroRecepcion, quién capturó y cuándo.
-  // - Si está en ASIGNANDO o EN_PROCESO, cambiar a COMPLETO.
-  // - Si ya está en COMPLETO, conservar el estado.
-  // - No modificar automáticamente FACTURADO ni FINALIZADO.
-  // - No aprobar el manifiesto como consecuencia de registrar la recepción.
-  // - Si tenía facturación pendiente, aplicar.
-  app.post('/api/orders/:id/record-reception', (req: Request, res: Response) => {
-    const order = orders.find(o => o.id === req.params.id);
-    if (!order) {
-      return res.status(404).json({ error: 'Orden no encontrada' });
-    }
-
-    if (!order.proveedorId) {
-      return res.status(400).json({
-        error: 'No es posible registrar recepción en una orden sin proveedor asignado. Debe asignarse un proveedor activo primero.',
-      });
-    }
-
-    const { numeroRecepcion, user } = req.body;
-    if (!numeroRecepcion || String(numeroRecepcion).trim().length === 0) {
-      return res.status(400).json({ error: 'El número de recepción no puede estar vacío' });
-    }
-
-    const cleanNumber = String(numeroRecepcion).trim();
-    const prevStatus = order.estado;
-    const nowIso = new Date().toISOString();
-
-    order.numeroRecepcion = cleanNumber;
-    order.recepcionRegistradaPor = user || 'admin@logitrack.com';
-    order.receptionRecordedAt = nowIso;
-
-    let targetStatus = order.estado;
-    if (order.estado === 'ASIGNANDO' || order.estado === 'EN_PROCESO') {
-      targetStatus = 'COMPLETO';
-      order.estado = 'COMPLETO';
-    }
-
-    addHistory(order, {
-      action: 'REGISTRO_RECEPCION',
-      prevStatus,
-      newStatus: order.estado,
-      user: user || 'admin@logitrack.com',
-      role: 'ADMIN',
-      comment: `Número de recepción '${cleanNumber}' registrado exitosamente por ${user || 'Administrador'}.`,
-      details: { numeroRecepcion: cleanNumber },
-    });
-
-    // Si había una facturación pendiente que se ingresó antes de completar, se aplica ahora
-    if (order.facturacionPendiente && order.estado === 'COMPLETO') {
-      order.numeroFacturacion = order.facturacionPendiente;
-      order.facturacionRegistradaPor = user || 'admin@logitrack.com';
-      order.invoicedAt = new Date().toISOString();
-      order.facturacionPendiente = null;
-      order.estado = 'FACTURADO';
-
-      addHistory(order, {
-        action: 'APLICACION_FACTURA_PENDIENTE',
-        prevStatus: 'COMPLETO',
-        newStatus: 'FACTURADO',
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
-        comment: `Factura pendiente '${order.numeroFacturacion}' aplicada automáticamente al completar la orden.`,
-      });
-    }
-
-    // Evaluar centralmente condición de finalización
-    const transition = evaluateOrderStateTransition(order);
-    if (transition.changed) {
-      const prevTransitionStatus = order.estado;
-      order.estado = transition.nextState;
-      if (order.estado === 'FINALIZADO') {
-        order.finalizedAt = new Date().toISOString();
+  app.post('/api/orders/:id/record-reception', async (req: Request, res: Response) => {
+    try {
+      const order = await dbGetOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: 'Orden no encontrada' });
       }
+
+      if (!order.proveedorId) {
+        return res.status(400).json({
+          error: 'No es posible registrar recepción en una orden sin proveedor asignado. Debe asignarse un proveedor activo primero.',
+        });
+      }
+
+      const { numeroRecepcion, user } = req.body;
+      if (!numeroRecepcion || String(numeroRecepcion).trim().length === 0) {
+        return res.status(400).json({ error: 'El número de recepción no puede estar vacío' });
+      }
+
+      const cleanNumber = String(numeroRecepcion).trim();
+      const prevStatus = order.estado;
+      const nowIso = new Date().toISOString();
+
+      order.numeroRecepcion = cleanNumber;
+      order.recepcionRegistradaPor = user || 'admin@logitrack.com';
+      order.receptionRecordedAt = nowIso;
+
+      if (order.estado === 'ASIGNANDO' || order.estado === 'EN_PROCESO') {
+        order.estado = 'COMPLETO';
+      }
+
       addHistory(order, {
-        action: 'FINALIZACION_AUTOMATICA',
-        prevStatus: prevTransitionStatus,
+        action: 'REGISTRO_RECEPCION',
+        prevStatus,
         newStatus: order.estado,
-        user: 'Sistema Central',
+        user: user || 'admin@logitrack.com',
         role: 'ADMIN',
-        comment: transition.reason,
+        comment: `Número de recepción '${cleanNumber}' registrado exitosamente por ${user || 'Administrador'}.`,
+        details: { numeroRecepcion: cleanNumber },
       });
-    }
 
-    res.json(order);
-  });
+      // Si había una facturación pendiente que se ingresó antes de completar, se aplica ahora
+      if (order.facturacionPendiente && order.estado === 'COMPLETO') {
+        order.numeroFacturacion = order.facturacionPendiente;
+        order.facturacionRegistradaPor = user || 'admin@logitrack.com';
+        order.invoicedAt = new Date().toISOString();
+        order.facturacionPendiente = null;
+        order.estado = 'FACTURADO';
 
-  // Upload Manifest (Provider only)
-  // Regla:
-  // - Solo el proveedor asignado puede subir manifiesto.
-  // - Versión incremental.
-  // - Estado PENDING (la carga nunca debe aprobarlo automáticamente).
-  // - Si había un manifiesto aprobado y se sube nueva versión, el anterior se marca como sustituido en historial
-  //   y se exige revisión de la nueva versión.
-  app.post('/api/orders/:id/manifest/upload', (req: Request, res: Response) => {
-    const order = orders.find(o => o.id === req.params.id);
-    if (!order) {
-      return res.status(404).json({ error: 'Orden no encontrada' });
-    }
-
-    const { fileName, fileSize, fileDataUrl, user, providerId } = req.body;
-
-    if (providerId && order.proveedorId !== providerId) {
-      return res.status(403).json({ error: 'Solo el proveedor asignado puede subir el manifiesto de esta orden' });
-    }
-
-    if (!fileName || String(fileName).trim().length === 0) {
-      return res.status(400).json({ error: 'El nombre del archivo es obligatorio' });
-    }
-
-    const nextVersion = (order.manifiestos.length > 0 ? Math.max(...order.manifiestos.map(m => m.version)) : 0) + 1;
-    const nowIso = new Date().toISOString();
-
-    // Marcar cualquier manifiesto anterior como no vigente
-    order.manifiestos.forEach(m => {
-      m.isCurrent = false;
-    });
-
-    const newManifest: ManifestDocument = {
-      version: nextVersion,
-      fileName: String(fileName).trim(),
-      fileSize: fileSize || '1.2 MB',
-      fileDataUrl: fileDataUrl || `data:application/pdf;base64,JVBERi0xLjQK...[mock-secure-doc-v${nextVersion}]`,
-      uploadedBy: user || order.proveedorNombre || 'Proveedor',
-      uploadedAt: nowIso,
-      status: 'PENDING', // REGLA: nunca debe aprobarse automáticamente
-      isCurrent: true,
-    };
-
-    order.manifiestos.push(newManifest);
-    order.manifiestoActual = newManifest;
-    order.manifestUploadedAt = nowIso;
-
-    addHistory(order, {
-      action: 'CARGA_MANIFIESTO',
-      user: user || 'Proveedor',
-      role: 'PROVIDER',
-      comment: `Manifiesto versión ${nextVersion} ('${newManifest.fileName}') subido. Estado: PENDING (pendiente de revisión por administración).`,
-      details: { version: nextVersion, fileName: newManifest.fileName, status: 'PENDING' },
-    });
-
-    res.json(order);
-  });
-
-  // Review Manifest (Admin only: Approve or Reject)
-  // Regla:
-  // - Solo un administrador puede aprobar o rechazar.
-  // - Si se rechaza, exigir motivo y permitir nueva versión.
-  // - Si la orden está en FACTURADO y se aprueba el manifiesto, pasa a FINALIZADO.
-  // - Si se aprueba cuando la orden está en COMPLETO y aún no existe factura, permanece en COMPLETO.
-  app.post('/api/orders/:id/manifest/review', (req: Request, res: Response) => {
-    const order = orders.find(o => o.id === req.params.id);
-    if (!order) {
-      return res.status(404).json({ error: 'Orden no encontrada' });
-    }
-
-    const { action, reason, user, role } = req.body;
-
-    if (role && role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Solo un administrador puede aprobar o rechazar un manifiesto' });
-    }
-
-    if (!order.manifiestoActual) {
-      return res.status(400).json({ error: 'No hay ningún manifiesto cargado para revisar en esta orden' });
-    }
-
-    const nowIso = new Date().toISOString();
-
-    if (action === 'REJECT') {
-      if (!reason || String(reason).trim().length === 0) {
-        return res.status(400).json({ error: 'Debe especificar el motivo del rechazo del manifiesto' });
+        addHistory(order, {
+          action: 'APLICACION_FACTURA_PENDIENTE',
+          prevStatus: 'COMPLETO',
+          newStatus: 'FACTURADO',
+          user: user || 'admin@logitrack.com',
+          role: 'ADMIN',
+          comment: `Factura pendiente '${order.numeroFacturacion}' aplicada automáticamente al completar la orden.`,
+        });
       }
 
-      order.manifiestoActual.status = 'REJECTED';
-      order.manifiestoActual.rejectionReason = String(reason).trim();
-      order.manifiestoActual.reviewedBy = user || 'admin@logitrack.com';
-      order.manifiestoActual.reviewedAt = nowIso;
-      order.manifestReviewedAt = nowIso;
-
-      addHistory(order, {
-        action: 'RECHAZO_MANIFIESTO',
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
-        comment: `Manifiesto v${order.manifiestoActual.version} RECHAZADO por administración. Motivo: ${order.manifiestoActual.rejectionReason}`,
-        details: { version: order.manifiestoActual.version, motivo: order.manifiestoActual.rejectionReason },
-      });
-
-      return res.json(order);
-    }
-
-    if (action === 'APPROVE') {
-      order.manifiestoActual.status = 'APPROVED';
-      order.manifiestoActual.rejectionReason = undefined;
-      order.manifiestoActual.reviewedBy = user || 'admin@logitrack.com';
-      order.manifiestoActual.reviewedAt = nowIso;
-      order.manifestReviewedAt = nowIso;
-
-      addHistory(order, {
-        action: 'APROBACION_MANIFIESTO',
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
-        comment: `Manifiesto v${order.manifiestoActual.version} APROBADO por administración.`,
-        details: { version: order.manifiestoActual.version },
-      });
-
-      // Evaluar centralmente finalización
+      // Evaluar centralmente condición de finalización
       const transition = evaluateOrderStateTransition(order);
       if (transition.changed) {
-        const prevStatus = order.estado;
+        const prevTransitionStatus = order.estado;
         order.estado = transition.nextState;
         if (order.estado === 'FINALIZADO') {
-          order.finalizedAt = nowIso;
+          order.finalizedAt = new Date().toISOString();
         }
         addHistory(order, {
           action: 'FINALIZACION_AUTOMATICA',
-          prevStatus,
+          prevStatus: prevTransitionStatus,
           newStatus: order.estado,
           user: 'Sistema Central',
           role: 'ADMIN',
@@ -1439,148 +1397,291 @@ async function startServer() {
         });
       }
 
-      return res.json(order);
+      const updated = await dbUpdateOrder(order);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al registrar número de recepción', details: err.message });
     }
+  });
 
-    return res.status(400).json({ error: 'Acción de revisión inválida' });
+  // Upload Manifest (Provider only)
+  app.post('/api/orders/:id/manifest/upload', async (req: Request, res: Response) => {
+    try {
+      const order = await dbGetOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: 'Orden no encontrada' });
+      }
+
+      const { fileName, fileSize, fileDataUrl, user, providerId } = req.body;
+
+      if (providerId && order.proveedorId !== providerId) {
+        return res.status(403).json({ error: 'Solo el proveedor asignado puede subir el manifiesto de esta orden' });
+      }
+
+      if (!fileName || String(fileName).trim().length === 0) {
+        return res.status(400).json({ error: 'El nombre del archivo es obligatorio' });
+      }
+
+      const nextVersion = (order.manifiestos.length > 0 ? Math.max(...order.manifiestos.map(m => m.version)) : 0) + 1;
+      const nowIso = new Date().toISOString();
+
+      // Marcar cualquier manifiesto anterior como no vigente
+      order.manifiestos.forEach(m => {
+        m.isCurrent = false;
+      });
+
+      const newManifest: ManifestDocument = {
+        version: nextVersion,
+        fileName: String(fileName).trim(),
+        fileSize: fileSize || '1.2 MB',
+        fileDataUrl: fileDataUrl || `data:application/pdf;base64,JVBERi0xLjQK...[mock-secure-doc-v${nextVersion}]`,
+        uploadedBy: user || order.proveedorNombre || 'Proveedor',
+        uploadedAt: nowIso,
+        status: 'PENDING',
+        isCurrent: true,
+      };
+
+      order.manifiestos.push(newManifest);
+      order.manifiestoActual = newManifest;
+      order.manifestUploadedAt = nowIso;
+
+      addHistory(order, {
+        action: 'CARGA_MANIFIESTO',
+        user: user || 'Proveedor',
+        role: 'PROVIDER',
+        comment: `Manifiesto versión ${nextVersion} ('${newManifest.fileName}') subido. Estado: PENDING (pendiente de revisión por administración).`,
+        details: { version: nextVersion, fileName: newManifest.fileName, status: 'PENDING' },
+      });
+
+      const updated = await dbUpdateOrder(order);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al subir manifiesto', details: err.message });
+    }
+  });
+
+  // Review Manifest (Admin only: Approve or Reject)
+  app.post('/api/orders/:id/manifest/review', async (req: Request, res: Response) => {
+    try {
+      const order = await dbGetOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: 'Orden no encontrada' });
+      }
+
+      const { action, reason, user, role } = req.body;
+
+      if (role && role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Solo un administrador puede aprobar o rechazar un manifiesto' });
+      }
+
+      if (!order.manifiestoActual) {
+        return res.status(400).json({ error: 'No hay ningún manifiesto cargado para revisar en esta orden' });
+      }
+
+      const nowIso = new Date().toISOString();
+
+      if (action === 'REJECT') {
+        if (!reason || String(reason).trim().length === 0) {
+          return res.status(400).json({ error: 'Debe especificar el motivo del rechazo del manifiesto' });
+        }
+
+        order.manifiestoActual.status = 'REJECTED';
+        order.manifiestoActual.rejectionReason = String(reason).trim();
+        order.manifiestoActual.reviewedBy = user || 'admin@logitrack.com';
+        order.manifiestoActual.reviewedAt = nowIso;
+        order.manifestReviewedAt = nowIso;
+
+        addHistory(order, {
+          action: 'RECHAZO_MANIFIESTO',
+          user: user || 'admin@logitrack.com',
+          role: 'ADMIN',
+          comment: `Manifiesto v${order.manifiestoActual.version} RECHAZADO por administración. Motivo: ${order.manifiestoActual.rejectionReason}`,
+          details: { version: order.manifiestoActual.version, motivo: order.manifiestoActual.rejectionReason },
+        });
+
+        const updated = await dbUpdateOrder(order);
+        return res.json(updated);
+      }
+
+      if (action === 'APPROVE') {
+        order.manifiestoActual.status = 'APPROVED';
+        order.manifiestoActual.rejectionReason = undefined;
+        order.manifiestoActual.reviewedBy = user || 'admin@logitrack.com';
+        order.manifiestoActual.reviewedAt = nowIso;
+        order.manifestReviewedAt = nowIso;
+
+        addHistory(order, {
+          action: 'APROBACION_MANIFIESTO',
+          user: user || 'admin@logitrack.com',
+          role: 'ADMIN',
+          comment: `Manifiesto v${order.manifiestoActual.version} APROBADO por administración.`,
+          details: { version: order.manifiestoActual.version },
+        });
+
+        // Evaluar centralmente finalización
+        const transition = evaluateOrderStateTransition(order);
+        if (transition.changed) {
+          const prevStatus = order.estado;
+          order.estado = transition.nextState;
+          if (order.estado === 'FINALIZADO') {
+            order.finalizedAt = nowIso;
+          }
+          addHistory(order, {
+            action: 'FINALIZACION_AUTOMATICA',
+            prevStatus,
+            newStatus: order.estado,
+            user: 'Sistema Central',
+            role: 'ADMIN',
+            comment: transition.reason,
+          });
+        }
+
+        const updated = await dbUpdateOrder(order);
+        return res.json(updated);
+      }
+
+      return res.status(400).json({ error: 'Acción de revisión inválida' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al procesar revisión del manifiesto', details: err.message });
+    }
   });
 
   // Record billing / invoice number (Admin only)
-  // Regla:
-  // - Administrador registra numeroFacturacion.
-  // - Validar que no esté vacío.
-  // - Si la orden está COMPLETO, cambiar a FACTURADO.
-  // - Si se registra antes de completar, conservar como pendiente y no saltarse estados operativos.
-  // - No permitir que proveedor o cliente registre facturación.
-  // - Si se modifica, conservar historial anterior.
-  // - Si al registrar factura en COMPLETO ya existía manifiesto aprobado -> pasa a FINALIZADO.
-  app.post('/api/orders/:id/record-invoice', (req: Request, res: Response) => {
-    const order = orders.find(o => o.id === req.params.id);
-    if (!order) {
-      return res.status(404).json({ error: 'Orden no encontrada' });
+  app.post('/api/orders/:id/record-invoice', async (req: Request, res: Response) => {
+    try {
+      const order = await dbGetOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: 'Orden no encontrada' });
+      }
+
+      const { numeroFacturacion, user, role } = req.body;
+
+      if (role && role !== 'ADMIN') {
+        return res.status(403).json({ error: 'No está permitido que un proveedor o cliente registre facturación' });
+      }
+
+      if (!numeroFacturacion || String(numeroFacturacion).trim().length === 0) {
+        return res.status(400).json({ error: 'El número de facturación no puede estar vacío' });
+      }
+
+      const cleanInvoice = String(numeroFacturacion).trim();
+      const nowIso = new Date().toISOString();
+      const isEdit = Boolean(order.numeroFacturacion);
+      const prevInvoice = order.numeroFacturacion;
+
+      // Si se registra antes de completar, se conserva como pendiente
+      if (order.estado !== 'COMPLETO' && order.estado !== 'FACTURADO' && order.estado !== 'FINALIZADO') {
+        order.facturacionPendiente = cleanInvoice;
+        addHistory(order, {
+          action: 'FACTURACION_ANTICIPADA_PENDIENTE',
+          user: user || 'admin@logitrack.com',
+          role: 'ADMIN',
+          comment: `Número de facturación '${cleanInvoice}' registrado como pendiente de aplicación (la orden está en ${order.estado} y no se saltan estados operativos).`,
+          details: { facturacionPendiente: cleanInvoice },
+        });
+        const updated = await dbUpdateOrder(order);
+        return res.json(updated);
+      }
+
+      // Orden en COMPLETO o FACTURADO
+      order.numeroFacturacion = cleanInvoice;
+      order.facturacionRegistradaPor = user || 'admin@logitrack.com';
+      order.invoicedAt = nowIso;
+      order.facturacionPendiente = null;
+
+      if (order.estado === 'COMPLETO') {
+        const prevStatus = order.estado;
+        order.estado = 'FACTURADO';
+
+        addHistory(order, {
+          action: isEdit ? 'MODIFICACION_FACTURA' : 'REGISTRO_FACTURACION',
+          prevStatus,
+          newStatus: 'FACTURADO',
+          user: user || 'admin@logitrack.com',
+          role: 'ADMIN',
+          comment: isEdit
+            ? `Factura modificada de '${prevInvoice}' a '${cleanInvoice}'.`
+            : `Factura '${cleanInvoice}' registrada. Orden pasa a FACTURADO.`,
+          details: { facturaAnterior: prevInvoice, nuevaFactura: cleanInvoice },
+        });
+      } else {
+        addHistory(order, {
+          action: 'MODIFICACION_FACTURA',
+          prevStatus: order.estado,
+          newStatus: order.estado,
+          user: user || 'admin@logitrack.com',
+          role: 'ADMIN',
+          comment: `Factura actualizada a '${cleanInvoice}'.`,
+          details: { facturaAnterior: prevInvoice, nuevaFactura: cleanInvoice },
+        });
+      }
+
+      // Evaluar centralmente si pasa a FINALIZADO
+      const transition = evaluateOrderStateTransition(order);
+      if (transition.changed) {
+        const prevTransStatus = order.estado;
+        order.estado = transition.nextState;
+        if (order.estado === 'FINALIZADO') {
+          order.finalizedAt = nowIso;
+        }
+        addHistory(order, {
+          action: 'FINALIZACION_AUTOMATICA',
+          prevStatus: prevTransStatus,
+          newStatus: order.estado,
+          user: 'Sistema Central',
+          role: 'ADMIN',
+          comment: transition.reason,
+        });
+      }
+
+      const updated = await dbUpdateOrder(order);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al registrar facturación', details: err.message });
     }
+  });
 
-    const { numeroFacturacion, user, role } = req.body;
+  // Reopen finalized order (Admin only)
+  app.post('/api/orders/:id/reopen', async (req: Request, res: Response) => {
+    try {
+      const order = await dbGetOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: 'Orden no encontrada' });
+      }
 
-    if (role && role !== 'ADMIN') {
-      return res.status(403).json({ error: 'No está permitido que un proveedor o cliente registre facturación' });
-    }
+      const { motivo, user, role } = req.body;
 
-    if (!numeroFacturacion || String(numeroFacturacion).trim().length === 0) {
-      return res.status(400).json({ error: 'El número de facturación no puede estar vacío' });
-    }
+      if (role && role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Solo un administrador autorizado puede reabrir una orden finalizada' });
+      }
 
-    const cleanInvoice = String(numeroFacturacion).trim();
-    const nowIso = new Date().toISOString();
-    const isEdit = Boolean(order.numeroFacturacion);
-    const prevInvoice = order.numeroFacturacion;
+      if (order.estado !== 'FINALIZADO') {
+        return res.status(400).json({ error: 'Solo se pueden reabrir órdenes que se encuentren en estado FINALIZADO' });
+      }
 
-    // Regla: si se registra antes de completar la orden, conservar el dato como pendiente de aplicación
-    // y no saltarse los estados operativos
-    if (order.estado !== 'COMPLETO' && order.estado !== 'FACTURADO' && order.estado !== 'FINALIZADO') {
-      order.facturacionPendiente = cleanInvoice;
-      addHistory(order, {
-        action: 'FACTURACION_ANTICIPADA_PENDIENTE',
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
-        comment: `Número de facturación '${cleanInvoice}' registrado como pendiente de aplicación (la orden está en ${order.estado} y no se saltan estados operativos).`,
-        details: { facturacionPendiente: cleanInvoice },
-      });
-      return res.json(order);
-    }
+      if (!motivo || String(motivo).trim().length === 0) {
+        return res.status(400).json({ error: 'Debe proporcionar una justificación obligatoria para la reapertura' });
+      }
 
-    // Orden en COMPLETO o FACTURADO
-    order.numeroFacturacion = cleanInvoice;
-    order.facturacionRegistradaPor = user || 'admin@logitrack.com';
-    order.invoicedAt = nowIso;
-    order.facturacionPendiente = null;
-
-    if (order.estado === 'COMPLETO') {
       const prevStatus = order.estado;
       order.estado = 'FACTURADO';
+      order.finalizedAt = null;
 
       addHistory(order, {
-        action: isEdit ? 'MODIFICACION_FACTURA' : 'REGISTRO_FACTURACION',
+        action: 'REAPERTURA_ADMINISTRATIVA',
         prevStatus,
         newStatus: 'FACTURADO',
         user: user || 'admin@logitrack.com',
         role: 'ADMIN',
-        comment: isEdit
-          ? `Factura modificada de '${prevInvoice}' a '${cleanInvoice}'.`
-          : `Factura '${cleanInvoice}' registrada. Orden pasa a FACTURADO.`,
-        details: { facturaAnterior: prevInvoice, nuevaFactura: cleanInvoice },
+        comment: `Reapertura administrativa autorizada. Motivo: ${String(motivo).trim()}`,
+        details: { justificacion: String(motivo).trim() },
       });
-    } else {
-      addHistory(order, {
-        action: 'MODIFICACION_FACTURA',
-        prevStatus: order.estado,
-        newStatus: order.estado,
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
-        comment: `Factura actualizada a '${cleanInvoice}'.`,
-        details: { facturaAnterior: prevInvoice, nuevaFactura: cleanInvoice },
-      });
+
+      const updated = await dbUpdateOrder(order);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al reabrir orden', details: err.message });
     }
-
-    // Evaluar centralmente si pasa a FINALIZADO
-    const transition = evaluateOrderStateTransition(order);
-    if (transition.changed) {
-      const prevTransStatus = order.estado;
-      order.estado = transition.nextState;
-      if (order.estado === 'FINALIZADO') {
-        order.finalizedAt = nowIso;
-      }
-      addHistory(order, {
-        action: 'FINALIZACION_AUTOMATICA',
-        prevStatus: prevTransStatus,
-        newStatus: order.estado,
-        user: 'Sistema Central',
-        role: 'ADMIN',
-        comment: transition.reason,
-      });
-    }
-
-    res.json(order);
-  });
-
-  // Reopen finalized order (Explicit authorized admin operation)
-  // Regla: Una orden finalizada no debe reabrirse automáticamente por cambios posteriores.
-  // Cualquier reapertura excepcional debe ser una operación administrativa explícita, autorizada y registrada en el historial.
-  app.post('/api/orders/:id/reopen', (req: Request, res: Response) => {
-    const order = orders.find(o => o.id === req.params.id);
-    if (!order) {
-      return res.status(404).json({ error: 'Orden no encontrada' });
-    }
-
-    const { motivo, user, role } = req.body;
-
-    if (role && role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Solo un administrador autorizado puede reabrir una orden finalizada' });
-    }
-
-    if (order.estado !== 'FINALIZADO') {
-      return res.status(400).json({ error: 'Solo se pueden reabrir órdenes que se encuentren en estado FINALIZADO' });
-    }
-
-    if (!motivo || String(motivo).trim().length === 0) {
-      return res.status(400).json({ error: 'Debe proporcionar una justificación obligatoria para la reapertura' });
-    }
-
-    const prevStatus = order.estado;
-    order.estado = 'FACTURADO';
-    order.finalizedAt = null;
-
-    addHistory(order, {
-      action: 'REAPERTURA_ADMINISTRATIVA',
-      prevStatus,
-      newStatus: 'FACTURADO',
-      user: user || 'admin@logitrack.com',
-      role: 'ADMIN',
-      comment: `Reapertura administrativa autorizada. Motivo: ${String(motivo).trim()}`,
-      details: { justificacion: String(motivo).trim() },
-    });
-
-    res.json(order);
   });
 
   // Acceptance Test Suite Runner
@@ -1589,13 +1690,19 @@ async function startServer() {
     res.json(suite);
   });
 
-  // Reset database to seed
-  app.post('/api/reset-data', (req: Request, res: Response) => {
-    providers = [...SEED_PROVIDERS];
-    clients = [...SEED_CLIENTS];
-    catalogConcepts = [...SEED_CATALOG_CONCEPTS];
-    initializeSeedOrders();
-    res.json({ message: 'Datos reiniciados con éxito', totalOrders: orders.length });
+  // Reset database to seed in PostgreSQL
+  app.post('/api/reset-data', async (req: Request, res: Response) => {
+    try {
+      await dbResetData({
+        providers: SEED_PROVIDERS,
+        clients: SEED_CLIENTS,
+        catalogConcepts: SEED_CATALOG_CONCEPTS,
+        orders: getInitialSeedOrders(),
+      });
+      res.json({ message: 'Datos reiniciados con éxito en PostgreSQL', totalOrders: 6 });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al reiniciar datos en PostgreSQL', details: err.message });
+    }
   });
 
   // Serve static files in production or mount Vite middleware in development

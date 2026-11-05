@@ -145,3 +145,12 @@ export interface SlaInfo {
   endDate: string;
   isFinalized: boolean;
 }
+
+export interface DatabaseStatus {
+  connected: boolean;
+  type: string;
+  version?: string;
+  database?: string;
+  host?: string;
+  error?: string;
+}

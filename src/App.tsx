@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Order, Provider, Client, Role, CatalogConcept } from './types.ts';
+import type { Order, Provider, Client, Role, CatalogConcept, DatabaseStatus } from './types.ts';
 import { Navbar } from './components/Navbar.tsx';
 import { AdminPortal } from './components/AdminPortal.tsx';
 import { ProviderPortal } from './components/ProviderPortal.tsx';
@@ -20,6 +20,7 @@ export default function App() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [catalogConcepts, setCatalogConcepts] = useState<CatalogConcept[]>([]);
+  const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
   const [activeProviderId, setActiveProviderId] = useState<string>('prov-1');
   const [activeClientId, setActiveClientId] = useState<string>('client-1');
 
@@ -33,7 +34,7 @@ export default function App() {
   const [isProviderCrudOpen, setIsProviderCrudOpen] = useState<boolean>(false);
   const [isConceptCatalogOpen, setIsConceptCatalogOpen] = useState<boolean>(false);
 
-  // Load config (providers, clients, catalog concepts)
+  // Load config (providers, clients, catalog concepts, db status)
   const loadConfig = async () => {
     try {
       const res = await fetch('/api/config');
@@ -42,6 +43,9 @@ export default function App() {
         setProviders(data.providers || []);
         setClients(data.clients || []);
         setCatalogConcepts(data.catalogConcepts || []);
+        if (data.database) {
+          setDbStatus(data.database);
+        }
         if (data.providers?.length > 0 && !activeProviderId) {
           setActiveProviderId(data.providers[0].id);
         }
@@ -118,6 +122,7 @@ export default function App() {
         }}
         onOpenAcceptanceTests={() => setIsAcceptanceTestsOpen(true)}
         onResetData={handleResetData}
+        dbStatus={dbStatus}
       />
 
       {/* Main Content Area */}

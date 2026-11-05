@@ -1,12 +1,13 @@
 import React from 'react';
-import { Shield, Truck, Building2, CheckCircle2, RotateCcw, Clock } from 'lucide-react';
-import type { Role } from '../types.ts';
+import { Shield, Truck, Building2, CheckCircle2, RotateCcw, Clock, Database } from 'lucide-react';
+import type { Role, DatabaseStatus } from '../types.ts';
 
 interface NavbarProps {
   currentRole: Role;
   onChangeRole: (role: Role) => void;
   onOpenAcceptanceTests: () => void;
   onResetData: () => void;
+  dbStatus?: DatabaseStatus | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -14,6 +15,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onChangeRole,
   onOpenAcceptanceTests,
   onResetData,
+  dbStatus,
 }) => {
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40">
@@ -78,6 +80,24 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Action Tools */}
           <div className="flex items-center gap-2.5">
+            {/* Database indicator badge */}
+            <div
+              className={`hidden sm:flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border font-mono ${
+                dbStatus?.connected
+                  ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/60'
+                  : 'bg-amber-950/60 text-amber-300 border-amber-700/60'
+              }`}
+              title={
+                dbStatus?.connected
+                  ? `Base de Datos: ${dbStatus.type} en Coolify (${dbStatus.host || 'Conectado'})`
+                  : 'Base de datos no conectada o en modo fallback'
+              }
+            >
+              <Database className="h-3 w-3 text-emerald-400" />
+              <span className="font-semibold">PostgreSQL 18</span>
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            </div>
+
             {/* Timezone badge */}
             <div className="hidden lg:flex items-center gap-1 text-[11px] text-slate-400 bg-slate-800/50 px-2.5 py-1 rounded-lg border border-slate-700/50 font-mono">
               <Clock className="h-3 w-3 text-slate-400" />
@@ -98,7 +118,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onResetData}
               className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-              title="Reiniciar datos de prueba al benchmark inicial"
+              title="Reiniciar datos en PostgreSQL a los valores benchmark"
             >
               <RotateCcw className="h-4 w-4" />
             </button>
