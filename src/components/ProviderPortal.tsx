@@ -10,6 +10,9 @@ import {
   ShieldCheck,
   Eye,
   Clock,
+  File,
+  Image as ImageIcon,
+  X,
 } from 'lucide-react';
 import type { Order, Provider } from '../types.ts';
 import { calculateSla } from '../domain/rules.ts';
@@ -36,6 +39,9 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
   const [statusFilter, setStatusFilter] = useState('TODOS');
   const [uploadingOrder, setUploadingOrder] = useState<Order | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string>('');
+  const [fileDataUrl, setFileDataUrl] = useState<string | null>(null);
+  const [fileSizeFormatted, setFileSizeFormatted] = useState<string>('');
+  const [fileTypeError, setFileTypeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -87,6 +93,33 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileTypeError(null);
+    const isValidPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const isValidJpg =
+      file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(file.name);
+
+    if (!isValidPdf && !isValidJpg) {
+      setFileTypeError('Solo se admiten archivos en formato PDF o Imagen (JPG, PNG).');
+      return;
+    }
+
+    const sizeMb = file.size / (1024 * 1024);
+    const formattedSize = sizeMb >= 1 ? `${sizeMb.toFixed(2)} MB` : `${(file.size / 1024).toFixed(1)} KB`;
+
+    setSelectedFileName(file.name);
+    setFileSizeFormatted(formattedSize);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setFileDataUrl(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleUploadManifest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadingOrder || !selectedFileName.trim()) return;
@@ -99,7 +132,8 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fileName: selectedFileName.trim(),
-          fileSize: '1.2 MB',
+          fileSize: fileSizeFormatted || '1.2 MB',
+          fileDataUrl: fileDataUrl || undefined,
           user: activeProvider.nombre,
           providerId: activeProvider.id,
         }),
@@ -109,10 +143,13 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
 
       setFeedback({
         type: 'success',
-        message: 'Manifiesto subido con éxito en estado PENDING. En espera de revisión.',
+        message: 'Manifiesto (PDF/Imagen) subido con éxito en estado PENDING. En espera de revisión.',
       });
       setUploadingOrder(null);
       setSelectedFileName('');
+      setFileDataUrl(null);
+      setFileSizeFormatted('');
+      setFileTypeError(null);
       onOrderUpdated();
     } catch (err: any) {
       setFeedback({ type: 'error', message: err.message });
@@ -299,9 +336,12 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
                               onClick={() => {
                                 setUploadingOrder(o);
                                 setSelectedFileName(`manifiesto_${o.folio.toLowerCase()}_v${o.manifiestos.length + 1}.pdf`);
+                                setFileDataUrl(null);
+                                setFileSizeFormatted('');
+                                setFileTypeError(null);
                               }}
                               className="px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-bold rounded-lg text-xs flex items-center gap-1 transition"
-                              title="Cargar manifiesto"
+                              title="Cargar manifiesto (PDF o Imagen)"
                             >
                               <Upload className="h-3 w-3" />
                               Manifiesto
@@ -324,52 +364,148 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
         </div>
       </div>
 
-      {/* Upload Manifest Quick Modal */}
+      {/* Upload Manifest Quick Modal con soporte PDF y JPG */}
       {uploadingOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 border border-slate-200 space-y-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Upload className="h-5 w-5 text-blue-600" />
-                <h3 className="text-sm font-bold text-slate-900">
-                  Carga de Manifiesto — {uploadingOrder.numeroPedido || uploadingOrder.folio}
-                </h3>
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-50 text-blue-700 rounded-xl border border-blue-200">
+                  <Upload className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Cargar Manifiesto Oficial de Recolección
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Orden: <span className="font-mono font-bold text-blue-700">{uploadingOrder.numeroPedido || uploadingOrder.folio}</span> &bull; {uploadingOrder.clienteNombre}
+                  </p>
+                </div>
               </div>
-              <button onClick={() => setUploadingOrder(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+              <button
+                onClick={() => {
+                  setUploadingOrder(null);
+                  setFileDataUrl(null);
+                  setFileTypeError(null);
+                }}
+                className="text-slate-400 hover:text-slate-700 p-1"
+              >
+                ✕
+              </button>
             </div>
 
-            <p className="text-xs text-slate-500">
-              Cargue la versión <strong>{uploadingOrder.manifiestos.length + 1}</strong> del documento. La carga quedará en estado <strong>PENDING</strong> en espera de aprobación por administración.
+            <p className="text-xs text-slate-600">
+              Adjunte el manifiesto firmado y sellado (versión <strong>{uploadingOrder.manifiestos.length + 1}</strong>). Se admiten archivos en formato <strong>PDF</strong> o <strong>Imagen JPG / PNG</strong>. Al subirlo pasará a estado <strong>PENDING</strong> para revisión de administración.
             </p>
 
-            <form onSubmit={handleUploadManifest} className="space-y-3">
+            {fileTypeError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{fileTypeError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleUploadManifest} className="space-y-4">
+              {/* Selector de Archivo PDF / JPG */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5 flex items-center justify-between">
+                  <span>Archivo del Manifiesto (PDF o JPG) *</span>
+                  <span className="text-[10px] text-blue-600 font-semibold lowercase">archivo digital</span>
+                </label>
+
+                {!fileDataUrl ? (
+                  <label className="border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50/40 rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer transition text-center group">
+                    <div className="flex items-center gap-2 text-slate-400 group-hover:text-blue-600 mb-2">
+                      <FileText className="h-7 w-7" />
+                      <ImageIcon className="h-7 w-7" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-700 group-hover:text-blue-700">
+                      Haga clic para seleccionar o arrastre el archivo aquí
+                    </span>
+                    <span className="text-[11px] text-slate-400 mt-1">
+                      Formatos permitidos: <strong>PDF</strong>, <strong>JPG</strong>, <strong>JPEG</strong>, <strong>PNG</strong> (hasta 10 MB)
+                    </span>
+                    <input
+                      type="file"
+                      accept=".pdf,image/jpeg,image/jpg,image/png,application/pdf"
+                      onChange={handleFileChange}
+                      className="hidden"
+                      required={!fileDataUrl}
+                    />
+                  </label>
+                ) : (
+                  <div className="bg-slate-50 p-4 rounded-xl border border-blue-200 flex items-center justify-between gap-3 shadow-xs">
+                    <div className="flex items-center gap-3">
+                      {fileDataUrl.startsWith('data:image/') || selectedFileName.match(/\.(jpg|jpeg|png)$/i) ? (
+                        <img
+                          src={fileDataUrl}
+                          alt="Vista previa"
+                          className="h-12 w-12 object-cover rounded-lg border border-slate-200 shadow-xs shrink-0"
+                        />
+                      ) : (
+                        <div className="h-12 w-12 rounded-lg bg-red-100 text-red-700 font-bold flex items-center justify-center shrink-0 border border-red-200">
+                          <FileText className="h-6 w-6" />
+                        </div>
+                      )}
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 truncate max-w-[240px]">
+                          {selectedFileName}
+                        </div>
+                        <div className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1 mt-0.5">
+                          <CheckCircle className="h-3.5 w-3.5" />
+                          <span>Archivo cargado ({fileSizeFormatted || 'Listo'})</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <label className="text-xs text-blue-600 hover:text-blue-800 font-bold cursor-pointer underline">
+                      Cambiar
+                      <input
+                        type="file"
+                        accept=".pdf,image/jpeg,image/jpg,image/png,application/pdf"
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              {/* Nombre del Documento */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Nombre del Documento
+                  Nombre descriptivo del documento *
                 </label>
                 <input
                   type="text"
                   value={selectedFileName}
                   onChange={(e) => setSelectedFileName(e.target.value)}
-                  className="w-full text-xs rounded-xl border border-slate-300 px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="Ej. Manifiesto_Folio_001_v1.pdf"
+                  className="w-full text-xs rounded-xl border border-slate-300 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
                   required
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              {/* Botones de acción */}
+              <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setUploadingOrder(null)}
-                  className="px-3 py-1.5 border border-slate-300 text-slate-600 text-xs rounded-lg hover:bg-slate-50"
+                  onClick={() => {
+                    setUploadingOrder(null);
+                    setFileDataUrl(null);
+                    setFileTypeError(null);
+                  }}
+                  className="px-4 py-2 border border-slate-300 text-slate-600 text-xs rounded-xl hover:bg-slate-50 font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || !selectedFileName.trim()}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg shadow-xs disabled:opacity-50"
+                  disabled={loading || !selectedFileName.trim() || !fileDataUrl}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-xs disabled:opacity-50 flex items-center gap-1.5 transition"
                 >
-                  Subir Versión {uploadingOrder.manifiestos.length + 1}
+                  <Upload className="h-3.5 w-3.5" />
+                  {loading ? 'Subiendo...' : `Subir Manifiesto v${uploadingOrder.manifiestos.length + 1}`}
                 </button>
               </div>
             </form>

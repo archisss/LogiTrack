@@ -17,8 +17,12 @@ import {
   ShieldAlert,
   Info,
   MapPin,
+  UserCheck,
+  Phone,
+  Eye,
+  Download,
 } from 'lucide-react';
-import type { Order, Provider, Client, Role, OrderStatus } from '../types.ts';
+import type { Order, Provider, Client, Role, OrderStatus, ManifestDocument } from '../types.ts';
 import { calculateSla, canFinalizeOrder } from '../domain/rules.ts';
 import { StatusBadge, ManifestBadge, SlaBadge } from './StatusBadge.tsx';
 
@@ -58,6 +62,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [showRejectBox, setShowRejectBox] = useState<boolean>(false);
   const [reopenReason, setReopenReason] = useState<string>('');
   const [showReopenBox, setShowReopenBox] = useState<boolean>(false);
+  const [viewingDoc, setViewingDoc] = useState<ManifestDocument | null>(null);
 
   // Keep form fields synced when a different order is selected or updated
   React.useEffect(() => {
@@ -72,6 +77,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       setShowRejectBox(false);
       setReopenReason('');
       setShowReopenBox(false);
+      setViewingDoc(null);
       setFeedback(null);
     }
   }, [
@@ -446,7 +452,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                                 {itemVal}
                               </td>
                               <td className="py-2.5 px-3 font-semibold text-slate-900">
-                                {descVal}
+                                <div>{descVal}</div>
+                                {c.observaciones && (
+                                  <div className="mt-1 text-[11px] text-amber-900 bg-amber-50 px-2 py-1 rounded-md border border-amber-200 font-normal">
+                                    <span className="font-bold text-amber-800">Observaciones:</span> {c.observaciones}
+                                  </div>
+                                )}
                               </td>
                               <td className="py-2.5 px-3 text-right font-mono text-slate-700">
                                 {precioUnitFormatted}
@@ -506,6 +517,38 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                         </div>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Información de Solicitó (Nombre y Teléfono) */}
+                {(order.solicitoNombre || order.solicitoTelefono) && (
+                  <div className="bg-emerald-50/70 rounded-2xl p-4 border border-emerald-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-emerald-100 text-emerald-700 rounded-xl">
+                        <UserCheck className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider">
+                          Solicitó el Servicio
+                        </div>
+                        <div className="text-xs font-bold text-slate-900 mt-0.5">
+                          {order.solicitoNombre || 'Sin nombre registrado'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {order.solicitoTelefono && (
+                      <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-emerald-200 text-xs">
+                        <Phone className="h-3.5 w-3.5 text-emerald-600" />
+                        <span className="font-semibold text-slate-700">Tel:</span>
+                        <a
+                          href={`tel:${order.solicitoTelefono}`}
+                          className="font-mono font-bold text-emerald-700 hover:underline"
+                        >
+                          {order.solicitoTelefono}
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -969,9 +1012,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => alert(`Visualizando documento seguro de forma autenticada: ${m.fileName} (Versión ${m.version})`)}
-                            className="px-3 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs rounded-lg font-medium transition"
+                            onClick={() => setViewingDoc(m)}
+                            className="px-3 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs rounded-lg font-medium transition flex items-center gap-1.5 shadow-xs"
                           >
+                            <Eye className="h-3.5 w-3.5 text-blue-600" />
                             Ver Documento
                           </button>
                         </div>
@@ -1042,6 +1086,72 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Visor de Documentos de Manifiesto */}
+      {viewingDoc && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col border border-slate-200 overflow-hidden">
+            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-600/30 rounded-lg text-indigo-400">
+                  <FileCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>{viewingDoc.fileName}</span>
+                    <span className="text-[10px] bg-indigo-900 text-indigo-200 px-2 py-0.5 rounded-full font-mono">
+                      v{viewingDoc.version}
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Subido por {viewingDoc.uploadedBy} el {new Date(viewingDoc.uploadedAt).toLocaleString('es-MX')}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {viewingDoc.fileDataUrl && (
+                  <a
+                    href={viewingDoc.fileDataUrl}
+                    download={viewingDoc.fileName}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 transition"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Descargar
+                  </a>
+                )}
+                <button
+                  onClick={() => setViewingDoc(null)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 flex items-center justify-center bg-slate-100/70 min-h-[420px]">
+              {viewingDoc.fileDataUrl?.startsWith('data:image/') || viewingDoc.fileName.match(/\.(jpg|jpeg|png|webp)$/i) ? (
+                <img
+                  src={viewingDoc.fileDataUrl}
+                  alt={viewingDoc.fileName}
+                  className="max-h-[72vh] max-w-full rounded-xl shadow-lg border border-slate-200 object-contain bg-white"
+                />
+              ) : viewingDoc.fileDataUrl ? (
+                <iframe
+                  src={viewingDoc.fileDataUrl}
+                  title={viewingDoc.fileName}
+                  className="w-full h-[72vh] rounded-xl border border-slate-300 shadow-sm bg-white"
+                />
+              ) : (
+                <div className="text-center p-8 text-slate-400 text-xs">
+                  <FileText className="h-12 w-12 text-slate-300 mx-auto mb-2" />
+                  <p className="font-semibold text-slate-700">Documento: {viewingDoc.fileName}</p>
+                  <p className="mt-1 text-slate-500">Versión {viewingDoc.version} &bull; {viewingDoc.fileSize || '1.2 MB'}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -14,6 +14,8 @@ import {
   MapPin,
   ShieldCheck,
   CheckCircle2,
+  UserCheck,
+  Phone,
 } from 'lucide-react';
 import type { Client, Provider, ItemConcept, CatalogConcept, ServiceLocation } from '../types.ts';
 import { calculateOrderTotals, calculateItemImporte } from '../domain/rules.ts';
@@ -39,6 +41,7 @@ interface FormConcept {
   descripcion: string; // Obligatoria
   cantidadOrdenada: number;
   precioUnitario: number;
+  observaciones?: string; // Opcional texto largo
 }
 
 const COMMON_UNITS = ['ST', 'KG', 'LT', 'M3', 'TAMBO', 'VIAJE', 'PZA'];
@@ -56,6 +59,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   // Requisito 1: Cada que abrimos Nueva Orden los valores deben estar en limpio
   const [numeroPedido, setNumeroPedido] = useState<string>('');
   const [clienteId, setClienteId] = useState<string>('');
+  const [solicitoNombre, setSolicitoNombre] = useState<string>('');
+  const [solicitoTelefono, setSolicitoTelefono] = useState<string>('');
   const [proveedorId, setProveedorId] = useState<string | null>(null);
   const [costoProveedor, setCostoProveedor] = useState<string>('');
 
@@ -74,6 +79,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [inputItem, setInputItem] = useState<string>('');
   const [inputCantidad, setInputCantidad] = useState<string>('1.00');
   const [inputPrecioUnitario, setInputPrecioUnitario] = useState<string>('');
+  const [inputObservaciones, setInputObservaciones] = useState<string>('');
   const [conceptFormError, setConceptFormError] = useState<string | null>(null);
 
   // Requisito 3: Modal de búsqueda y selección de transportista con filtros
@@ -87,6 +93,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     if (isOpen) {
       setNumeroPedido('');
       setClienteId(clients[0]?.id || '');
+      setSolicitoNombre('');
+      setSolicitoTelefono('');
       setProveedorId(null);
       setCostoProveedor('');
       setSelectedLocation(null);
@@ -108,6 +116,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     setInputItem('');
     setInputCantidad('1.00');
     setInputPrecioUnitario('');
+    setInputObservaciones('');
     setConceptFormError(null);
   };
 
@@ -122,6 +131,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       setInputUnidad(selected.unidad || 'ST');
       setInputItem(selected.item || '');
       setInputPrecioUnitario(selected.precioUnitario ? selected.precioUnitario.toString() : '0');
+      if (selected.observaciones) {
+        setInputObservaciones(selected.observaciones);
+      }
     }
   };
 
@@ -156,6 +168,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       descripcion: desc,
       cantidadOrdenada: cant,
       precioUnitario: pu,
+      observaciones: inputObservaciones.trim() || undefined,
     };
 
     if (editingIndex !== null) {
@@ -180,6 +193,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     setInputItem(target.item || '');
     setInputCantidad(target.cantidadOrdenada.toString());
     setInputPrecioUnitario(target.precioUnitario.toString());
+    setInputObservaciones(target.observaciones || '');
     setConceptFormError(null);
   };
 
@@ -200,6 +214,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     cantidadOrdenada: Number(c.cantidadOrdenada) || 0,
     precioUnitario: Number(c.precioUnitario) || 0,
     importe: calculateItemImporte(Number(c.cantidadOrdenada) || 0, Number(c.precioUnitario) || 0),
+    observaciones: c.observaciones ? c.observaciones.trim() : undefined,
   }));
 
   const provCostNum = proveedorId && costoProveedor !== '' ? Number(costoProveedor) : null;
@@ -237,6 +252,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const payload = {
         numeroPedido: numeroPedido.trim(),
         clienteId,
+        solicitoNombre: solicitoNombre.trim() || undefined,
+        solicitoTelefono: solicitoTelefono.trim() || undefined,
         ubicacionServicio: selectedLocation || undefined,
         proveedorId: proveedorId || null,
         costoProveedor: proveedorId ? Number(costoProveedor) : null,
@@ -332,6 +349,50 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* SECCIÓN: SOLICITÓ (NOMBRE Y NÚMERO TELEFÓNICO) */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg">
+                  <UserCheck className="h-3.5 w-3.5" />
+                </span>
+                <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  Solicitó
+                </span>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  (Contacto de quien solicitó el servicio de recolección)
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
+                <div className="md:col-span-7">
+                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
+                    Nombre de Quien Solicitó el Servicio
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Ing. Carlos Mendoza / Lic. Roberto Ruiz"
+                    value={solicitoNombre}
+                    onChange={(e) => setSolicitoNombre(e.target.value)}
+                    className="w-full text-xs rounded-xl border border-slate-300 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                  />
+                </div>
+
+                <div className="md:col-span-5">
+                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1 flex items-center gap-1">
+                    <Phone className="h-3 w-3 text-slate-400" />
+                    Número Telefónico
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="Ej. 55 1234 5678"
+                    value={solicitoTelefono}
+                    onChange={(e) => setSolicitoTelefono(e.target.value)}
+                    className="w-full text-xs rounded-xl border border-slate-300 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                  />
+                </div>
               </div>
             </div>
 
@@ -570,6 +631,21 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   </button>
                 </div>
 
+                {/* OBSERVACIONES DEL CONCEPTO (TEXTO LARGO OPCIONAL) */}
+                <div className="col-span-12">
+                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1 flex items-center justify-between">
+                    <span>Observaciones (Opcional)</span>
+                    <span className="text-[10px] text-slate-400 font-normal lowercase">visible para el transportista al ver detalle</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Instrucciones especiales, precauciones de carga/descarga o notas del concepto..."
+                    value={inputObservaciones}
+                    onChange={(e) => setInputObservaciones(e.target.value)}
+                    className="w-full text-xs rounded-xl border border-slate-300 px-3 py-1.5 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
+                  />
+                </div>
+
                 {/* ITEM OPCIONAL Y UNIDADES RÁPIDAS */}
                 <div className="col-span-12 flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200">
                   <div className="flex items-center gap-1.5">
@@ -681,6 +757,12 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                                   </span>
                                 )}
                               </div>
+                              {concept.observaciones && (
+                                <div className="text-[11px] text-amber-900 bg-amber-50/90 px-2 py-0.5 rounded border border-amber-200 mt-1 font-normal flex items-start gap-1">
+                                  <span className="font-semibold text-amber-800 shrink-0">Obs:</span>
+                                  <span>{concept.observaciones}</span>
+                                </div>
+                              )}
                             </td>
 
                             {/* CANTIDAD */}

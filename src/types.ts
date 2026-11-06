@@ -34,6 +34,7 @@ export interface CatalogConcept {
   unidad: string; // ST, KG, LT, M3, etc.
   descripcion: string; // Campo obligatorio
   precioUnitario: number;
+  observaciones?: string; // Campo opcional de texto largo
 }
 
 export interface ItemConcept {
@@ -45,6 +46,7 @@ export interface ItemConcept {
   cantidadOrdenada: number;
   precioUnitario: number;
   importe: number; // cantidad * precioUnitario calculated via Decimal
+  observaciones?: string; // Campo opcional de texto largo
 }
 
 export interface ManifestDocument {
@@ -116,6 +118,8 @@ export interface Order {
   proveedorId: string | null;
   proveedorNombre: string | null;
   fechaOrden: string; // ISO
+  solicitoNombre?: string; // Nombre de quien solicitó el servicio
+  solicitoTelefono?: string; // Número telefónico de quien solicitó el servicio
   ubicacionServicio?: ServiceLocation; // Ubicación para el servicio / CEDI
   conceptos: ItemConcept[];
   

@@ -1272,7 +1272,17 @@ async function startServer() {
   // Create order (Admin only)
   app.post('/api/orders', async (req: Request, res: Response) => {
     try {
-      const { clienteId, conceptos, proveedorId, costoProveedor, user, numeroPedido, ubicacionServicio } = req.body;
+      const {
+        clienteId,
+        conceptos,
+        proveedorId,
+        costoProveedor,
+        user,
+        numeroPedido,
+        ubicacionServicio,
+        solicitoNombre,
+        solicitoTelefono,
+      } = req.body;
 
       if (!numeroPedido || String(numeroPedido).trim().length === 0) {
         return res.status(400).json({ error: 'El Número de Pedido es obligatorio' });
@@ -1322,6 +1332,7 @@ async function startServer() {
           cantidadOrdenada: cantidad,
           precioUnitario,
           importe,
+          observaciones: c.observaciones && String(c.observaciones).trim() ? String(c.observaciones).trim() : undefined,
         };
       });
 
@@ -1361,6 +1372,8 @@ async function startServer() {
         proveedorId: assignedProv ? assignedProv.id : null,
         proveedorNombre: assignedProv ? assignedProv.nombre : null,
         fechaOrden: nowIso,
+        solicitoNombre: solicitoNombre && String(solicitoNombre).trim() ? String(solicitoNombre).trim() : undefined,
+        solicitoTelefono: solicitoTelefono && String(solicitoTelefono).trim() ? String(solicitoTelefono).trim() : undefined,
         ubicacionServicio: ubicacionServicio || undefined,
         conceptos: sanitizedConceptos,
         subtotalCliente: totals.subtotalCliente,

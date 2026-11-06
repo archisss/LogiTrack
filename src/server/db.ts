@@ -123,6 +123,8 @@ export async function initDatabase(initialSeed: {
         proveedor_id VARCHAR(100) REFERENCES providers(id) ON DELETE SET NULL,
         proveedor_nombre VARCHAR(255),
         fecha_orden TIMESTAMPTZ NOT NULL,
+        solicito_nombre TEXT,
+        solicito_telefono TEXT,
         ubicacion_servicio JSONB,
         conceptos JSONB NOT NULL DEFAULT '[]'::jsonb,
         subtotal_cliente NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
@@ -152,6 +154,8 @@ export async function initDatabase(initialSeed: {
     // Ensure columns exist for existing tables
     await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS numero_pedido VARCHAR(100);');
     await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS ubicacion_servicio JSONB;');
+    await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS solicito_nombre TEXT;');
+    await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS solicito_telefono TEXT;');
 
     console.log('[DB] Tablas verificadas exitosamente.');
 
@@ -349,6 +353,8 @@ function mapRowToOrder(row: any): Order {
     proveedorId: row.proveedor_id || null,
     proveedorNombre: row.proveedor_nombre || null,
     fechaOrden: row.fecha_orden instanceof Date ? row.fecha_orden.toISOString() : row.fecha_orden,
+    solicitoNombre: row.solicito_nombre || undefined,
+    solicitoTelefono: row.solicito_telefono || undefined,
     ubicacionServicio: row.ubicacion_servicio
       ? (typeof row.ubicacion_servicio === 'string' ? JSON.parse(row.ubicacion_servicio) : row.ubicacion_servicio)
       : undefined,
@@ -565,7 +571,7 @@ export async function dbCreateOrder(order: Order): Promise<Order> {
   await pool.query(
     `INSERT INTO orders (
       id, numero_pedido, folio, cliente_id, cliente_nombre, proveedor_id, proveedor_nombre,
-      fecha_orden, ubicacion_servicio, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
+      fecha_orden, solicito_nombre, solicito_telefono, ubicacion_servicio, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
       utilidad_estimada, estado, numero_recepcion, recepcion_registrada_por,
       numero_facturacion, facturacion_registrada_por, facturacion_pendiente,
       created_at, assigned_at, started_at, reception_recorded_at,
@@ -573,12 +579,12 @@ export async function dbCreateOrder(order: Order): Promise<Order> {
       manifiestos, manifiesto_actual, historial
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7,
-      $8, $9, $10, $11, $12, $13,
-      $14, $15, $16, $17,
-      $18, $19, $20,
-      $21, $22, $23, $24,
-      $25, $26, $27, $28,
-      $29, $30, $31
+      $8, $9, $10, $11, $12, $13, $14,
+      $15, $16, $17, $18,
+      $19, $20, $21,
+      $22, $23, $24, $25,
+      $26, $27, $28, $29,
+      $30, $31, $32, $33
     );`,
     [
       order.id,
@@ -589,6 +595,8 @@ export async function dbCreateOrder(order: Order): Promise<Order> {
       order.proveedorId || null,
       order.proveedorNombre || null,
       order.fechaOrden,
+      order.solicitoNombre || null,
+      order.solicitoTelefono || null,
       JSON.stringify(order.ubicacionServicio || null),
       JSON.stringify(order.conceptos || []),
       order.subtotalCliente,
@@ -628,28 +636,30 @@ export async function dbUpdateOrder(order: Order): Promise<Order> {
        proveedor_id = $6,
        proveedor_nombre = $7,
        fecha_orden = $8,
-       ubicacion_servicio = $9,
-       conceptos = $10,
-       subtotal_cliente = $11,
-       costo_total_cliente = $12,
-       costo_proveedor = $13,
-       utilidad_estimada = $14,
-       estado = $15,
-       numero_recepcion = $16,
-       recepcion_registrada_por = $17,
-       numero_facturacion = $18,
-       facturacion_registrada_por = $19,
-       facturacion_pendiente = $20,
-       assigned_at = $21,
-       started_at = $22,
-       reception_recorded_at = $23,
-       manifest_uploaded_at = $24,
-       manifest_reviewed_at = $25,
-       invoiced_at = $26,
-       finalized_at = $27,
-       manifiestos = $28,
-       manifiesto_actual = $29,
-       historial = $30
+       solicito_nombre = $9,
+       solicito_telefono = $10,
+       ubicacion_servicio = $11,
+       conceptos = $12,
+       subtotal_cliente = $13,
+       costo_total_cliente = $14,
+       costo_proveedor = $15,
+       utilidad_estimada = $16,
+       estado = $17,
+       numero_recepcion = $18,
+       recepcion_registrada_por = $19,
+       numero_facturacion = $20,
+       facturacion_registrada_por = $21,
+       facturacion_pendiente = $22,
+       assigned_at = $23,
+       started_at = $24,
+       reception_recorded_at = $25,
+       manifest_uploaded_at = $26,
+       manifest_reviewed_at = $27,
+       invoiced_at = $28,
+       finalized_at = $29,
+       manifiestos = $30,
+       manifiesto_actual = $31,
+       historial = $32
      WHERE id = $1;`,
     [
       order.id,
@@ -660,6 +670,8 @@ export async function dbUpdateOrder(order: Order): Promise<Order> {
       order.proveedorId || null,
       order.proveedorNombre || null,
       order.fechaOrden,
+      order.solicitoNombre || null,
+      order.solicitoTelefono || null,
       JSON.stringify(order.ubicacionServicio || null),
       JSON.stringify(order.conceptos || []),
       order.subtotalCliente,
@@ -739,7 +751,7 @@ export async function dbResetData(seed: {
       await client.query(
         `INSERT INTO orders (
           id, numero_pedido, folio, cliente_id, cliente_nombre, proveedor_id, proveedor_nombre,
-          fecha_orden, ubicacion_servicio, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
+          fecha_orden, solicito_nombre, solicito_telefono, ubicacion_servicio, conceptos, subtotal_cliente, costo_total_cliente, costo_proveedor,
           utilidad_estimada, estado, numero_recepcion, recepcion_registrada_por,
           numero_facturacion, facturacion_registrada_por, facturacion_pendiente,
           created_at, assigned_at, started_at, reception_recorded_at,
@@ -747,12 +759,12 @@ export async function dbResetData(seed: {
           manifiestos, manifiesto_actual, historial
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7,
-          $8, $9, $10, $11, $12, $13,
-          $14, $15, $16, $17,
-          $18, $19, $20,
-          $21, $22, $23, $24,
-          $25, $26, $27, $28,
-          $29, $30, $31
+          $8, $9, $10, $11, $12, $13, $14,
+          $15, $16, $17, $18,
+          $19, $20, $21,
+          $22, $23, $24, $25,
+          $26, $27, $28, $29,
+          $30, $31, $32, $33
         );`,
         [
           ord.id,
@@ -763,6 +775,8 @@ export async function dbResetData(seed: {
           ord.proveedorId || null,
           ord.proveedorNombre || null,
           ord.fechaOrden,
+          ord.solicitoNombre || null,
+          ord.solicitoTelefono || null,
           JSON.stringify(ord.ubicacionServicio || null),
           JSON.stringify(ord.conceptos || []),
           ord.subtotalCliente,
