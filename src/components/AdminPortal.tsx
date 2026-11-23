@@ -1,24 +1,20 @@
 import React, { useState, useMemo } from 'react';
 import {
-  FileText,
   Plus,
   Search,
-  Filter,
   DollarSign,
-  TrendingUp,
-  Clock,
   CheckCircle2,
-  AlertTriangle,
-  Building2,
   Truck,
-  ExternalLink,
   MapPin,
+  FileSpreadsheet,
+  Users,
 } from 'lucide-react';
-import type { Order, Provider, Client, OrderStatus, SlaColor, ServiceLocation } from '../types.ts';
+import type { Order, Provider, Client, SlaColor, ServiceLocation, Role } from '../types.ts';
 import { calculateSla } from '../domain/rules.ts';
 import { StatusBadge, ManifestBadge, SlaBadge } from './StatusBadge.tsx';
 
 interface AdminPortalProps {
+  loggedInRole: Role;
   orders: Order[];
   providers: Provider[];
   clients: Client[];
@@ -29,12 +25,14 @@ interface AdminPortalProps {
   onOpenProviderCrud: () => void;
   onOpenConceptCatalog: () => void;
   onOpenServiceLocations: () => void;
+  onOpenReports: () => void;
+  onOpenUsers: () => void;
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({
+  loggedInRole,
   orders,
   providers,
-  clients,
   serviceLocations = [],
   onOpenNewOrder,
   onSelectOrder,
@@ -42,11 +40,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onOpenProviderCrud,
   onOpenConceptCatalog,
   onOpenServiceLocations,
+  onOpenReports,
+  onOpenUsers,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('TODOS');
   const [slaFilter, setSlaFilter] = useState<string>('TODOS');
   const [providerFilter, setProviderFilter] = useState<string>('TODOS');
+
+  const isAdmin = loggedInRole === 'ADMIN';
 
   // Compute metrics
   const metrics = useMemo(() => {
@@ -55,6 +57,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     let totalEstimatedProfit = 0;
     let openOrdersCount = 0;
     let finalizedOrdersCount = 0;
+    let approvedManifestsCount = 0;
 
     const slaCounts: Record<SlaColor, number> = {
       gray: 0,
@@ -65,18 +68,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
 
     orders.forEach((o) => {
-      totalClientBilling += o.costoTotalCliente || 0;
-      if (o.costoProveedor !== null) {
-        totalProviderCost += o.costoProveedor;
-      }
-      if (o.utilidadEstimada !== null) {
-        totalEstimatedProfit += o.utilidadEstimada;
+      if (isAdmin) {
+        totalClientBilling += o.costoTotalCliente || 0;
+        if (o.costoProveedor !== null) {
+          totalProviderCost += o.costoProveedor;
+        }
+        if (o.utilidadEstimada !== null) {
+          totalEstimatedProfit += o.utilidadEstimada;
+        }
       }
 
       if (o.estado === 'FINALIZADO') {
         finalizedOrdersCount++;
       } else {
         openOrdersCount++;
+      }
+
+      if (o.manifiestoActual?.status === 'APPROVED') {
+        approvedManifestsCount++;
       }
 
       const sla = calculateSla(o);
@@ -87,12 +96,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       totalOrders: orders.length,
       openOrdersCount,
       finalizedOrdersCount,
+      approvedManifestsCount,
       totalClientBilling,
       totalProviderCost,
       totalEstimatedProfit,
       slaCounts,
     };
-  }, [orders]);
+  }, [orders, isAdmin]);
 
   // Filtered orders
   const filteredOrders = useMemo(() => {
@@ -104,11 +114,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         (o.proveedorNombre && o.proveedorNombre.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (o.numeroRecepcion && o.numeroRecepcion.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (o.numeroFacturacion && o.numeroFacturacion.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (o.ubicacionServicio && (
-          o.ubicacionServicio.cedi.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          o.ubicacionServicio.division.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          o.ubicacionServicio.direccion.ciudad.toLowerCase().includes(searchTerm.toLowerCase())
-        ));
+        (o.ubicacionServicio &&
+          (o.ubicacionServicio.cedi.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            o.ubicacionServicio.division.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            o.ubicacionServicio.direccion.ciudad.toLowerCase().includes(searchTerm.toLowerCase())));
 
       const matchesStatus = statusFilter === 'TODOS' || o.estado === statusFilter;
       const matchesProvider = providerFilter === 'TODOS' || o.proveedorId === providerFilter;
@@ -126,14 +135,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div>
           <h1 className="text-xl font-black text-slate-900 tracking-tight">
-            Panel General de Administración
+            {isAdmin ? 'Panel General de Administración' : 'Panel Operativo y Reportes'}
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Control integral de órdenes, costeo, asignación de transportistas y validación de reglas definitivas
+            {isAdmin
+              ? 'Control integral de órdenes, costeo, asignación de transportistas y validación de reglas definitivas'
+              : 'Control operativo de órdenes, asignación de transportistas, recepción, facturación y generación de reportes'}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={onOpenProviderCrud}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition shadow-xs"
@@ -162,12 +173,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </button>
 
           <button
-            onClick={onOpenAcceptanceTests}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition shadow-xs"
+            onClick={onOpenReports}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100 transition shadow-xs"
+            title="Generar reportes operativos y exportar CSV"
           >
-            <CheckCircle2 className="h-4 w-4 text-indigo-600" />
-            Pruebas (13)
+            <FileSpreadsheet className="h-4 w-4 text-sky-600" />
+            Reportes
           </button>
+
+          {isAdmin && (
+            <>
+              <button
+                onClick={onOpenUsers}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition shadow-xs"
+                title="Gestión de Usuarios y Roles"
+              >
+                <Users className="h-4 w-4 text-indigo-600" />
+                Usuarios
+              </button>
+
+              <button
+                onClick={onOpenAcceptanceTests}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition shadow-xs"
+              >
+                <CheckCircle2 className="h-4 w-4 text-indigo-600" />
+                Pruebas (13)
+              </button>
+            </>
+          )}
 
           <button
             onClick={onOpenNewOrder}
@@ -180,41 +213,55 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+      <div className={`grid grid-cols-2 ${isAdmin ? 'md:grid-cols-4 lg:grid-cols-6' : 'md:grid-cols-4'} gap-3`}>
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
           <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Órdenes</div>
-          <div className="text-2xl font-black text-slate-900 mt-1">{metrics.totalOrders}</div>
+          <div className="text-2xl font-black text-slate-900 mt-1 font-mono">{metrics.totalOrders}</div>
           <div className="text-[11px] text-slate-500 mt-0.5">
             {metrics.openOrdersCount} abiertas / {metrics.finalizedOrdersCount} finalizadas
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="text-[11px] font-bold text-indigo-700 uppercase tracking-wider">Total Facturado Cliente</div>
-          <div className="text-lg font-black text-indigo-700 mt-1 font-mono">
-            ${metrics.totalClientBilling.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">costoTotalCliente</div>
-        </div>
+        {isAdmin ? (
+          <>
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="text-[11px] font-bold text-indigo-700 uppercase tracking-wider">Total Facturado Cliente</div>
+              <div className="text-lg font-black text-indigo-700 mt-1 font-mono">
+                ${metrics.totalClientBilling.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">costoTotalCliente</div>
+            </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Costo Proveedores</div>
-          <div className="text-lg font-black text-amber-700 mt-1 font-mono">
-            ${metrics.totalProviderCost.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">costoProveedor</div>
-        </div>
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Costo Proveedores</div>
+              <div className="text-lg font-black text-amber-700 mt-1 font-mono">
+                ${metrics.totalProviderCost.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">costoProveedor</div>
+            </div>
 
-        <div className="bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200 shadow-xs">
-          <div className="text-[11px] font-bold text-emerald-900 uppercase tracking-wider flex items-center justify-between">
-            <span>Utilidad Estimada</span>
-            <span className="text-[9px] px-1 bg-emerald-200 text-emerald-900 rounded font-bold">Admin</span>
+            <div className="bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200 shadow-xs">
+              <div className="text-[11px] font-bold text-emerald-900 uppercase tracking-wider flex items-center justify-between">
+                <span>Utilidad Estimada</span>
+                <span className="text-[9px] px-1 bg-emerald-200 text-emerald-900 rounded font-bold">Admin</span>
+              </div>
+              <div className="text-lg font-black text-emerald-800 mt-1 font-mono">
+                ${metrics.totalEstimatedProfit.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-emerald-700 mt-0.5">Cliente - Proveedor</div>
+            </div>
+          </>
+        ) : (
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Manifiestos Aprobados</div>
+            <div className="text-2xl font-black text-emerald-700 mt-1 font-mono">
+              {metrics.approvedManifestsCount}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              de {metrics.totalOrders} órdenes registradas
+            </div>
           </div>
-          <div className="text-lg font-black text-emerald-800 mt-1 font-mono">
-            ${metrics.totalEstimatedProfit.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-[10px] text-emerald-700 mt-0.5">Cliente - Proveedor</div>
-        </div>
+        )}
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs col-span-2">
           <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center justify-between">
@@ -223,19 +270,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
           <div className="flex items-center justify-between gap-1 text-center">
             <div className="flex-1 bg-emerald-50 rounded-lg py-1 px-1.5 border border-emerald-200">
-              <span className="text-xs font-bold text-emerald-800 block">{metrics.slaCounts.green}</span>
+              <span className="text-xs font-bold text-emerald-800 block font-mono">{metrics.slaCounts.green}</span>
               <span className="text-[9px] text-emerald-700 font-semibold block">1-5d</span>
             </div>
             <div className="flex-1 bg-yellow-50 rounded-lg py-1 px-1.5 border border-yellow-200">
-              <span className="text-xs font-bold text-yellow-800 block">{metrics.slaCounts.yellow}</span>
+              <span className="text-xs font-bold text-yellow-800 block font-mono">{metrics.slaCounts.yellow}</span>
               <span className="text-[9px] text-yellow-700 font-semibold block">6-8d</span>
             </div>
             <div className="flex-1 bg-orange-50 rounded-lg py-1 px-1.5 border border-orange-200">
-              <span className="text-xs font-bold text-orange-800 block">{metrics.slaCounts.orange}</span>
+              <span className="text-xs font-bold text-orange-800 block font-mono">{metrics.slaCounts.orange}</span>
               <span className="text-[9px] text-orange-700 font-semibold block">9-10d</span>
             </div>
             <div className="flex-1 bg-red-50 rounded-lg py-1 px-1.5 border border-red-200">
-              <span className="text-xs font-bold text-red-800 block">{metrics.slaCounts.red}</span>
+              <span className="text-xs font-bold text-red-800 block font-mono">{metrics.slaCounts.red}</span>
               <span className="text-[9px] text-red-700 font-semibold block">11d+</span>
             </div>
           </div>
@@ -256,7 +303,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Status filter */}
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -271,7 +317,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <option value="FINALIZADO">FINALIZADO</option>
           </select>
 
-          {/* Antigüedad Filter */}
           <select
             value={slaFilter}
             onChange={(e) => setSlaFilter(e.target.value)}
@@ -284,7 +329,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <option value="red">11+ días</option>
           </select>
 
-          {/* Provider Filter */}
           <select
             value={providerFilter}
             onChange={(e) => setProviderFilter(e.target.value)}

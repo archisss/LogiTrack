@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle2, XCircle, Play, RefreshCw, AlertTriangle, ShieldCheck, ChevronDown, ChevronRight } from 'lucide-react';
-import type { AcceptanceSuiteResult, TestCaseResult } from '../domain/acceptanceTests.ts';
+import type { AcceptanceSuiteResult } from '../domain/acceptanceTests.ts';
+import { apiFetch } from '../utils/api.ts';
 
 interface AcceptanceTestsModalProps {
   isOpen: boolean;
@@ -20,7 +21,7 @@ export const AcceptanceTestsModal: React.FC<AcceptanceTestsModalProps> = ({
   const runTests = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/acceptance-tests');
+      const res = await apiFetch('/api/acceptance-tests');
       if (res.ok) {
         const data = await res.json();
         setSuiteResult(data);

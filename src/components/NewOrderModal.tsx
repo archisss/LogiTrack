@@ -21,6 +21,7 @@ import type { Client, Provider, ItemConcept, CatalogConcept, ServiceLocation } f
 import { calculateOrderTotals, calculateItemImporte } from '../domain/rules.ts';
 import { ProviderSelectModal } from './ProviderSelectModal.tsx';
 import { ServiceLocationSelectModal } from './ServiceLocationSelectModal.tsx';
+import { apiFetch } from '../utils/api.ts';
 
 interface NewOrderModalProps {
   isOpen: boolean;
@@ -31,6 +32,7 @@ interface NewOrderModalProps {
   catalogConcepts: CatalogConcept[];
   onOpenCatalogManager: () => void;
   onOrderCreated: () => void;
+  hideFinancials?: boolean;
 }
 
 interface FormConcept {
@@ -55,6 +57,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   catalogConcepts,
   onOpenCatalogManager,
   onOrderCreated,
+  hideFinancials = false,
 }) => {
   // Requisito 1: Cada que abrimos Nueva Orden los valores deben estar en limpio
   const [numeroPedido, setNumeroPedido] = useState<string>('');
@@ -154,8 +157,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       return;
     }
 
-    const pu = parseFloat(inputPrecioUnitario);
-    if (isNaN(pu) || pu < 0) {
+    const pu = hideFinancials ? 0 : parseFloat(inputPrecioUnitario);
+    if (!hideFinancials && (isNaN(pu) || pu < 0)) {
       setConceptFormError('El PRECIO UNITARIO debe ser mayor o igual a 0.');
       return;
     }
@@ -242,13 +245,18 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       return;
     }
 
-    if (proveedorId && (costoProveedor === '' || Number(costoProveedor) < 0)) {
+    if (proveedorId && !hideFinancials && (costoProveedor === '' || Number(costoProveedor) < 0)) {
       setGeneralError('Si asigna un transportista, debe especificar un costo válido (mayor o igual a 0).');
       return;
     }
 
     setSubmitting(true);
     try {
+      const payloadConceptos = conceptsWithImporte.map((c, idx) => ({
+        ...c,
+        catalogId: conceptos[idx]?.catalogId,
+      }));
+
       const payload = {
         numeroPedido: numeroPedido.trim(),
         clienteId,
@@ -256,12 +264,11 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         solicitoTelefono: solicitoTelefono.trim() || undefined,
         ubicacionServicio: selectedLocation || undefined,
         proveedorId: proveedorId || null,
-        costoProveedor: proveedorId ? Number(costoProveedor) : null,
-        conceptos: conceptsWithImporte,
-        user: 'admin@logitrack.com',
+        costoProveedor: proveedorId ? (hideFinancials ? 0 : Number(costoProveedor)) : null,
+        conceptos: payloadConceptos,
       };
 
-      const res = await fetch('/api/orders', {
+      const res = await apiFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -539,7 +546,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   <option value="">-- Concepto manual / libre --</option>
                   {catalogConcepts.map((cat) => (
                     <option key={cat.id} value={cat.id}>
-                      {cat.descripcion} ({cat.unidad}) - ${cat.precioUnitario.toFixed(2)} MXN
+                      {hideFinancials
+                        ? `${cat.descripcion} (${cat.unidad})`
+                        : `${cat.descripcion} (${cat.unidad}) - $${cat.precioUnitario.toFixed(2)} MXN`}
                     </option>
                   ))}
                 </select>
@@ -548,7 +557,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               {/* Fila de campos del concepto */}
               <div className="grid grid-cols-12 gap-2.5 items-end">
                 {/* DESCRIPCIÓN (OBLIGATORIA) */}
-                <div className="col-span-12 md:col-span-4">
+                <div className={hideFinancials ? 'col-span-12 md:col-span-6' : 'col-span-12 md:col-span-4'}>
                   <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
                     DESCRIPCIÓN *
                   </label>
@@ -591,24 +600,26 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   />
                 </div>
 
-                {/* PRECIO UNITARIO (sin flechas up/down) */}
-                <div className="col-span-6 md:col-span-2">
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
-                    PRECIO UNIT. *
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-2 top-1.5 text-xs text-slate-400 font-bold">$</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={inputPrecioUnitario}
-                      onChange={(e) => setInputPrecioUnitario(e.target.value)}
-                      className="w-full text-xs rounded-lg border border-slate-300 pl-5 pr-2 py-1.5 text-right bg-white font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
+                {/* PRECIO UNITARIO (oculto para Usuario operativo) */}
+                {!hideFinancials && (
+                  <div className="col-span-6 md:col-span-2">
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
+                      PRECIO UNIT. *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-xs text-slate-400 font-bold">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={inputPrecioUnitario}
+                        onChange={(e) => setInputPrecioUnitario(e.target.value)}
+                        className="w-full text-xs rounded-lg border border-slate-300 pl-5 pr-2 py-1.5 text-right bg-white font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* BOTÓN AGREGAR / ACTUALIZAR */}
                 <div className="col-span-6 md:col-span-2 flex items-center">
@@ -677,7 +688,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     ))}
                   </div>
 
-                  {inputCantidad && inputPrecioUnitario && (
+                  {!hideFinancials && inputCantidad && inputPrecioUnitario && (
                     <div className="text-[11px] font-bold text-slate-700">
                       Importe previsto: $
                       {calculateItemImporte(
@@ -716,15 +727,19 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                       <th className="py-3 px-4 text-left font-black">DESCRIPCIÓN</th>
                       <th className="py-3 px-3 text-right font-black">CANTIDAD</th>
                       <th className="py-3 px-3 text-center font-black">UNIDAD</th>
-                      <th className="py-3 px-4 text-right font-black">PRECIO UNITARIO</th>
-                      <th className="py-3 px-4 text-right font-black">PRECIO TOTAL</th>
+                      {!hideFinancials && (
+                        <>
+                          <th className="py-3 px-4 text-right font-black">PRECIO UNITARIO</th>
+                          <th className="py-3 px-4 text-right font-black">PRECIO TOTAL</th>
+                        </>
+                      )}
                       <th className="py-3 px-3 text-center font-black w-24">ACCIONES</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 bg-white text-xs text-slate-800">
                     {conceptos.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="py-8 text-center text-slate-400 bg-slate-50/50">
+                        <td colSpan={hideFinancials ? 4 : 6} className="py-8 text-center text-slate-400 bg-slate-50/50">
                           <Calculator className="h-8 w-8 text-slate-300 mx-auto mb-2" />
                           <p className="font-semibold text-slate-600">Aún no se han agregado conceptos a la orden</p>
                           <p className="text-[11px] text-slate-400 mt-0.5">
@@ -780,23 +795,27 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                               </span>
                             </td>
 
-                            {/* PRECIO UNITARIO */}
-                            <td className="py-3 px-4 text-right font-mono font-medium text-slate-800">
-                              ${' '}
-                              {concept.precioUnitario.toLocaleString('es-MX', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </td>
+                            {!hideFinancials && (
+                              <>
+                                {/* PRECIO UNITARIO */}
+                                <td className="py-3 px-4 text-right font-mono font-medium text-slate-800">
+                                  ${' '}
+                                  {concept.precioUnitario.toLocaleString('es-MX', {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </td>
 
-                            {/* PRECIO TOTAL */}
-                            <td className="py-3 px-4 text-right font-mono font-bold text-slate-950">
-                              ${' '}
-                              {totalImporte.toLocaleString('es-MX', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </td>
+                                {/* PRECIO TOTAL */}
+                                <td className="py-3 px-4 text-right font-mono font-bold text-slate-950">
+                                  ${' '}
+                                  {totalImporte.toLocaleString('es-MX', {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </td>
+                              </>
+                            )}
 
                             {/* ACCIONES: EDITAR Y ELIMINAR */}
                             <td className="py-3 px-3 text-center">
@@ -826,7 +845,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   </tbody>
 
                   {/* Pie de tabla con Suma de Precio Total */}
-                  {conceptos.length > 0 && (
+                  {!hideFinancials && conceptos.length > 0 && (
                     <tfoot>
                       <tr className="bg-slate-50 border-t-2 border-slate-300 font-bold text-slate-900">
                         <td colSpan={3} className="py-3 px-4 text-right uppercase tracking-wider text-xs text-slate-600">
@@ -911,17 +930,19 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <div className="text-[10px] uppercase font-bold text-slate-400">Costo Proveedor:</div>
-                      <div className="text-sm font-mono font-bold text-slate-900">
-                        ${' '}
-                        {parseFloat(costoProveedor || '0').toLocaleString('es-MX', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}{' '}
-                        MXN
+                    {!hideFinancials && (
+                      <div className="text-right">
+                        <div className="text-[10px] uppercase font-bold text-slate-400">Costo Proveedor:</div>
+                        <div className="text-sm font-mono font-bold text-slate-900">
+                          ${' '}
+                          {parseFloat(costoProveedor || '0').toLocaleString('es-MX', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          MXN
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     <button
                       type="button"
@@ -957,37 +978,39 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               )}
             </div>
 
-            {/* SECCIÓN 5: RESUMEN FINANCIERO DEFINITIVO (REGLA DE NEGOCIO 1) */}
-            <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-4 space-y-2 text-xs">
-              <div className="flex justify-between text-slate-600">
-                <span>Subtotal Cliente (Suma de conceptos):</span>
-                <span className="font-mono font-semibold">
-                  ${totals.subtotalCliente.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
-                </span>
+            {/* SECCIÓN 5: RESUMEN FINANCIERO DEFINITIVO (SOLO ADMIN) */}
+            {!hideFinancials && (
+              <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-4 space-y-2 text-xs">
+                <div className="flex justify-between text-slate-600">
+                  <span>Subtotal Cliente (Suma de conceptos):</span>
+                  <span className="font-mono font-semibold">
+                    ${totals.subtotalCliente.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
+                  </span>
+                </div>
+                <div className="flex justify-between font-bold text-slate-900 border-t border-indigo-100 pt-2">
+                  <span>Costo Total Cobrado al Cliente (costoTotalCliente):</span>
+                  <span className="font-mono text-base text-indigo-700">
+                    ${totals.costoTotalCliente.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
+                  </span>
+                </div>
+                {totals.costoProveedor !== null && (
+                  <>
+                    <div className="flex justify-between text-slate-600 pt-1">
+                      <span>Costo Proveedor:</span>
+                      <span className="font-mono">
+                        ${totals.costoProveedor.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-bold text-emerald-800 border-t border-indigo-100 pt-1.5">
+                      <span>Utilidad Estimada (Solo Administrador):</span>
+                      <span className="font-mono text-sm text-emerald-700">
+                        ${totals.utilidadEstimada?.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="flex justify-between font-bold text-slate-900 border-t border-indigo-100 pt-2">
-                <span>Costo Total Cobrado al Cliente (costoTotalCliente):</span>
-                <span className="font-mono text-base text-indigo-700">
-                  ${totals.costoTotalCliente.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
-                </span>
-              </div>
-              {totals.costoProveedor !== null && (
-                <>
-                  <div className="flex justify-between text-slate-600 pt-1">
-                    <span>Costo Proveedor:</span>
-                    <span className="font-mono">
-                      ${totals.costoProveedor.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
-                    </span>
-                  </div>
-                  <div className="flex justify-between font-bold text-emerald-800 border-t border-indigo-100 pt-1.5">
-                    <span>Utilidad Estimada (Solo Administrador):</span>
-                    <span className="font-mono text-sm text-emerald-700">
-                      ${totals.utilidadEstimada?.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
+            )}
 
             {/* Acciones */}
             <div className="flex justify-end gap-3 pt-2">
@@ -1018,6 +1041,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         providers={providers}
         selectedProviderId={proveedorId}
         currentCostoProveedor={costoProveedor}
+        hideFinancials={hideFinancials}
         onSelectProvider={(selectedId, costo) => {
           setProveedorId(selectedId);
           setCostoProveedor(costo);

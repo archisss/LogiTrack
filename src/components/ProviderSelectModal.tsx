@@ -21,6 +21,7 @@ interface ProviderSelectModalProps {
   selectedProviderId: string | null;
   currentCostoProveedor: string;
   onSelectProvider: (providerId: string | null, costo: string) => void;
+  hideFinancials?: boolean;
 }
 
 export const ProviderSelectModal: React.FC<ProviderSelectModalProps> = ({
@@ -30,6 +31,7 @@ export const ProviderSelectModal: React.FC<ProviderSelectModalProps> = ({
   selectedProviderId,
   currentCostoProveedor,
   onSelectProvider,
+  hideFinancials = false,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEstado, setSelectedEstado] = useState<string>('TODOS');
@@ -95,14 +97,14 @@ export const ProviderSelectModal: React.FC<ProviderSelectModalProps> = ({
   if (!isOpen) return null;
 
   const handleConfirm = () => {
-    if (tempProviderId) {
+    if (tempProviderId && !hideFinancials) {
       if (tempCosto === '' || isNaN(Number(tempCosto)) || Number(tempCosto) < 0) {
         setCostoError('Debe ingresar un costo válido para el proveedor seleccionado (mayor o igual a 0).');
         return;
       }
     }
     setCostoError(null);
-    onSelectProvider(tempProviderId, tempProviderId ? tempCosto : '');
+    onSelectProvider(tempProviderId, tempProviderId ? (hideFinancials ? '0' : tempCosto) : '');
     onClose();
   };
 
@@ -347,24 +349,28 @@ export const ProviderSelectModal: React.FC<ProviderSelectModalProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-slate-700 whitespace-nowrap">
-                  Costo Proveedor ($ MXN) *
-                </label>
-                <div className="relative w-36">
-                  <span className="absolute left-2.5 top-1.5 text-xs text-slate-400 font-bold">$</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={tempCosto}
-                    onChange={(e) => {
-                      setTempCosto(e.target.value);
-                      setCostoError(null);
-                    }}
-                    className="w-full pl-6 pr-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-mono font-bold text-right text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+                {!hideFinancials && (
+                  <>
+                    <label className="text-xs font-bold text-slate-700 whitespace-nowrap">
+                      Costo Proveedor ($ MXN) *
+                    </label>
+                    <div className="relative w-36">
+                      <span className="absolute left-2.5 top-1.5 text-xs text-slate-400 font-bold">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={tempCosto}
+                        onChange={(e) => {
+                          setTempCosto(e.target.value);
+                          setCostoError(null);
+                        }}
+                        className="w-full pl-6 pr-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-mono font-bold text-right text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={handleClearSelection}

@@ -18,6 +18,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import type { Provider, ProviderAddress, ProviderAuthorizationDoc } from '../types.ts';
+import { apiFetch } from '../utils/api.ts';
 
 interface ProviderCrudModalProps {
   isOpen: boolean;
@@ -236,7 +237,7 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
     try {
       if (editingId) {
         // Update
-        const res = await fetch(`/api/providers/${editingId}`, {
+        const res = await apiFetch(`/api/providers/${editingId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -246,7 +247,7 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
         setFeedback({ type: 'success', message: 'Transportista actualizado exitosamente.' });
       } else {
         // Create
-        const res = await fetch('/api/providers', {
+        const res = await apiFetch('/api/providers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -268,7 +269,7 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
   const handleToggleActive = async (prov: Provider) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/providers/${prov.id}`, {
+      const res = await apiFetch(`/api/providers/${prov.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ activo: !prov.activo }),
@@ -289,7 +290,7 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/providers/${prov.id}`, {
+      const res = await apiFetch(`/api/providers/${prov.id}`, {
         method: 'DELETE',
       });
       const data = await res.json();

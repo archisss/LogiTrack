@@ -1,4 +1,16 @@
-export type Role = 'ADMIN' | 'PROVIDER' | 'CLIENT';
+export type Role = 'ADMIN' | 'USER' | 'PROVIDER' | 'CLIENT';
+
+export interface AppUser {
+  id: string;
+  nombre: string;
+  email: string;
+  role: Role;
+  entityId?: string | null;
+  entityName?: string | null;
+  activo: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 export type OrderStatus =
   | 'CREADO'

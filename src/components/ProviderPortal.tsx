@@ -2,21 +2,17 @@ import React, { useState, useMemo } from 'react';
 import {
   Truck,
   Upload,
-  Play,
   CheckCircle,
   AlertCircle,
   FileText,
   Search,
   ShieldCheck,
-  Eye,
-  Clock,
-  File,
   Image as ImageIcon,
-  X,
 } from 'lucide-react';
 import type { Order, Provider } from '../types.ts';
 import { calculateSla } from '../domain/rules.ts';
 import { StatusBadge, ManifestBadge, SlaBadge } from './StatusBadge.tsx';
+import { apiFetch } from '../utils/api.ts';
 
 interface ProviderPortalProps {
   orders: Order[];
@@ -25,6 +21,7 @@ interface ProviderPortalProps {
   onSelectProvider: (providerId: string) => void;
   onOrderUpdated: () => void;
   onSelectOrder: (order: Order) => void;
+  isAdminPreview?: boolean;
 }
 
 export const ProviderPortal: React.FC<ProviderPortalProps> = ({
@@ -34,6 +31,7 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
   onSelectProvider,
   onOrderUpdated,
   onSelectOrder,
+  isAdminPreview = false,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('TODOS');
@@ -65,33 +63,6 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
       return matchesSearch && matchesStatus;
     });
   }, [assignedOrders, searchTerm, statusFilter]);
-
-  const handleStartProcess = async (orderId: string) => {
-    setLoading(true);
-    setFeedback(null);
-    try {
-      const res = await fetch(`/api/orders/${orderId}/start-process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          providerId: activeProvider.id,
-          user: activeProvider.email || activeProvider.nombre,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      setFeedback({
-        type: 'success',
-        message: 'Recolección iniciada. La orden cambió a EN_PROCESO.',
-      });
-      onOrderUpdated();
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err.message });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -127,14 +98,13 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/orders/${uploadingOrder.id}/manifest/upload`, {
+      const res = await apiFetch(`/api/orders/${uploadingOrder.id}/manifest/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fileName: selectedFileName.trim(),
           fileSize: fileSizeFormatted || '1.2 MB',
           fileDataUrl: fileDataUrl || undefined,
-          user: activeProvider.nombre,
           providerId: activeProvider.id,
         }),
       });
@@ -167,11 +137,16 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
             <Truck className="h-6 w-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg font-black text-slate-900 tracking-tight">Portal del Transportista</h1>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold">
                 Rol: Proveedor
               </span>
+              {!isAdminPreview && activeProvider && (
+                <span className="text-xs font-bold text-slate-700">
+                  &bull; {activeProvider.nombre}
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               Listado compacto de recolecciones asignadas, control de rutas y gestión de manifiestos
@@ -179,23 +154,25 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
           </div>
         </div>
 
-        {/* Provider switcher */}
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-semibold text-slate-600">Transportista activo:</label>
-          <select
-            value={activeProvider?.id}
-            onChange={(e) => onSelectProvider(e.target.value)}
-            className="text-xs font-bold rounded-xl border border-slate-300 px-3 py-2 bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {providers
-              .filter((p) => p.activo)
-              .map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nombre}
-                </option>
-              ))}
-          </select>
-        </div>
+        {/* Provider switcher (only visible when Admin previews the Provider portal) */}
+        {isAdminPreview && (
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-600">Transportista activo:</label>
+            <select
+              value={activeProvider?.id}
+              onChange={(e) => onSelectProvider(e.target.value)}
+              className="text-xs font-bold rounded-xl border border-slate-300 px-3 py-2 bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {providers
+                .filter((p) => p.activo)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Privacy Guarantee banner */}
@@ -222,7 +199,7 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
         </div>
       )}
 
-      {/* Search and Filters Bar (Same compact style as Admin) */}
+      {/* Search and Filters Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
         <div className="flex-1 min-w-[240px] relative">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -249,7 +226,7 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
         </select>
       </div>
 
-      {/* Compact Table View matching Admin */}
+      {/* Compact Table View */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
@@ -330,7 +307,6 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
                             Ver Detalle
                           </button>
 
-                          {/* Acciones del transportista: Subir manifiesto cuando la orden esté en proceso o completa */}
                           {(o.estado === 'EN_PROCESO' || o.estado === 'COMPLETO' || o.estado === 'FACTURADO') && (
                             <button
                               onClick={() => {
@@ -357,14 +333,13 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
           </table>
         </div>
 
-        {/* Table footer */}
         <div className="bg-slate-50 px-4 py-3 border-t border-slate-200 text-xs text-slate-500 flex justify-between items-center">
           <span>Mostrando {filteredOrders.length} de {assignedOrders.length} órdenes asignadas</span>
           <span className="italic">Haga clic en cualquier fila para inspeccionar el detalle</span>
         </div>
       </div>
 
-      {/* Upload Manifest Quick Modal con soporte PDF y JPG */}
+      {/* Upload Manifest Modal */}
       {uploadingOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200 space-y-4">
@@ -406,7 +381,6 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
             )}
 
             <form onSubmit={handleUploadManifest} className="space-y-4">
-              {/* Selector de Archivo PDF / JPG */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5 flex items-center justify-between">
                   <span>Archivo del Manifiesto (PDF o JPG) *</span>
@@ -471,7 +445,6 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
                 )}
               </div>
 
-              {/* Nombre del Documento */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
                   Nombre descriptivo del documento *
@@ -486,7 +459,6 @@ export const ProviderPortal: React.FC<ProviderPortalProps> = ({
                 />
               </div>
 
-              {/* Botones de acción */}
               <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100">
                 <button
                   type="button"

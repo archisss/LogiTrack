@@ -1,18 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import {
   Building2,
-  FileText,
-  DollarSign,
   Download,
   CheckCircle,
   Clock,
   ShieldCheck,
   Search,
-  Eye,
 } from 'lucide-react';
-import type { Order, Client } from '../types.ts';
+import type { Order, Client, ManifestDocument } from '../types.ts';
 import { calculateSla } from '../domain/rules.ts';
-import { StatusBadge, ManifestBadge, SlaBadge } from './StatusBadge.tsx';
+import { StatusBadge, SlaBadge } from './StatusBadge.tsx';
 
 interface ClientPortalProps {
   orders: Order[];
@@ -20,6 +17,7 @@ interface ClientPortalProps {
   activeClientId: string;
   onSelectClient: (clientId: string) => void;
   onSelectOrder: (order: Order) => void;
+  isAdminPreview?: boolean;
 }
 
 export const ClientPortal: React.FC<ClientPortalProps> = ({
@@ -28,6 +26,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   activeClientId,
   onSelectClient,
   onSelectOrder,
+  isAdminPreview = false,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('TODOS');
@@ -53,6 +52,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     });
   }, [clientOrders, searchTerm, statusFilter]);
 
+  const handleDownloadManifest = (order: Order, manifest: ManifestDocument) => {
+    if (manifest.fileDataUrl && !manifest.fileDataUrl.includes('[mock-secure-doc')) {
+      const link = document.createElement('a');
+      link.href = manifest.fileDataUrl;
+      link.download = manifest.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+    onSelectOrder(order);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header bar */}
@@ -62,11 +74,16 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             <Building2 className="h-6 w-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg font-black text-slate-900 tracking-tight">Portal del Cliente</h1>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-bold">
                 Rol: Cliente
               </span>
+              {!isAdminPreview && activeClient && (
+                <span className="text-xs font-bold text-slate-700">
+                  &bull; {activeClient.nombre}
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               Listado compacto de recolecciones, importes autorizados y consulta de manifiestos certificados
@@ -74,21 +91,23 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           </div>
         </div>
 
-        {/* Client selector */}
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-semibold text-slate-600">Empresa Cliente:</label>
-          <select
-            value={activeClient?.id}
-            onChange={(e) => onSelectClient(e.target.value)}
-            className="text-xs font-bold rounded-xl border border-slate-300 px-3 py-2 bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nombre}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Client selector (only visible when Admin previews Client portal) */}
+        {isAdminPreview && (
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-600">Empresa Cliente:</label>
+            <select
+              value={activeClient?.id}
+              onChange={(e) => onSelectClient(e.target.value)}
+              className="text-xs font-bold rounded-xl border border-slate-300 px-3 py-2 bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Privacy guarantee */}
@@ -130,7 +149,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         </select>
       </div>
 
-      {/* Compact Table View matching Admin */}
+      {/* Compact Table View */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
@@ -218,9 +237,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                           {approvedManifest && (
                             <button
-                              onClick={() => alert(`Descargando manifiesto certificado: ${approvedManifest.fileName}`)}
+                              onClick={() => handleDownloadManifest(o, approvedManifest)}
                               className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
-                              title="Descargar manifiesto"
+                              title="Descargar o ver manifiesto certificado"
                             >
                               <Download className="h-3 w-3" />
                               PDF
@@ -236,7 +255,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           </table>
         </div>
 
-        {/* Table footer */}
         <div className="bg-slate-50 px-4 py-3 border-t border-slate-200 text-xs text-slate-500 flex justify-between items-center">
           <span>Mostrando {filteredOrders.length} de {clientOrders.length} órdenes</span>
           <span className="italic">Haga clic en cualquier fila para inspeccionar el desglose de conceptos</span>

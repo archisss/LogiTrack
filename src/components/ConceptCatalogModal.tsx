@@ -8,12 +8,14 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import type { CatalogConcept } from '../types.ts';
+import { apiFetch } from '../utils/api.ts';
 
 interface ConceptCatalogModalProps {
   isOpen: boolean;
   onClose: () => void;
   concepts: CatalogConcept[];
   onConceptsChanged: () => void;
+  hideFinancials?: boolean;
 }
 
 const COMMON_UNITS = ['ST', 'KG', 'LT', 'M3', 'TAMBO', 'VIAJE', 'PZA'];
@@ -23,6 +25,7 @@ export const ConceptCatalogModal: React.FC<ConceptCatalogModalProps> = ({
   onClose,
   concepts,
   onConceptsChanged,
+  hideFinancials = false,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isEditing, setIsEditing] = useState(false);
@@ -75,16 +78,17 @@ export const ConceptCatalogModal: React.FC<ConceptCatalogModalProps> = ({
     }
 
     try {
-      const payload = {
+      const payload: Record<string, any> = {
         item: item.trim(),
         unidad: unidad.trim().toUpperCase() || 'ST',
         descripcion: descripcion.trim(),
-        precioUnitario: parseFloat(precioUnitario) || 0,
       };
+      if (!hideFinancials) {
+        payload.precioUnitario = parseFloat(precioUnitario) || 0;
+      }
 
       if (editingId) {
-        // Update
-        const res = await fetch(`/api/catalog-concepts/${editingId}`, {
+        const res = await apiFetch(`/api/catalog-concepts/${editingId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -93,8 +97,7 @@ export const ConceptCatalogModal: React.FC<ConceptCatalogModalProps> = ({
         if (!res.ok) throw new Error(data.error || 'Error al actualizar concepto');
         setFeedback({ type: 'success', message: 'Concepto actualizado exitosamente.' });
       } else {
-        // Create
-        const res = await fetch('/api/catalog-concepts', {
+        const res = await apiFetch('/api/catalog-concepts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -119,7 +122,7 @@ export const ConceptCatalogModal: React.FC<ConceptCatalogModalProps> = ({
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/catalog-concepts/${cat.id}`, {
+      const res = await apiFetch(`/api/catalog-concepts/${cat.id}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -254,25 +257,27 @@ export const ConceptCatalogModal: React.FC<ConceptCatalogModalProps> = ({
                   </div>
                 </div>
 
-                {/* PRECIO UNITARIO */}
-                <div className="md:col-span-2">
-                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                    PRECIO UNITARIO *
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-2 text-xs text-slate-400">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="0.00"
-                      value={precioUnitario}
-                      onChange={(e) => setPrecioUnitario(e.target.value)}
-                      className="w-full text-xs rounded-xl border border-slate-300 pl-6 pr-3 py-2 text-right bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono font-bold"
-                      required
-                    />
+                {/* PRECIO UNITARIO (oculto para Usuario operativo) */}
+                {!hideFinancials && (
+                  <div className="md:col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                      PRECIO UNITARIO *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-2 text-xs text-slate-400">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={precioUnitario}
+                        onChange={(e) => setPrecioUnitario(e.target.value)}
+                        className="w-full text-xs rounded-xl border border-slate-300 pl-6 pr-3 py-2 text-right bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono font-bold"
+                        required
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -326,14 +331,14 @@ export const ConceptCatalogModal: React.FC<ConceptCatalogModalProps> = ({
                   <th className="py-2.5 px-4">DESCRIPCIÓN (Concepto)</th>
                   <th className="py-2.5 px-4">UNIDAD</th>
                   <th className="py-2.5 px-4">ITEM (Opcional)</th>
-                  <th className="py-2.5 px-4 text-right">PRECIO UNITARIO</th>
+                  {!hideFinancials && <th className="py-2.5 px-4 text-right">PRECIO UNITARIO</th>}
                   <th className="py-2.5 px-4 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredConcepts.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-400">
+                    <td colSpan={hideFinancials ? 4 : 5} className="py-8 text-center text-slate-400">
                       No se encontraron conceptos en el catálogo.
                     </td>
                   </tr>
@@ -358,9 +363,11 @@ export const ConceptCatalogModal: React.FC<ConceptCatalogModalProps> = ({
                         )}
                       </td>
 
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-800">
-                        ${c.precioUnitario.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
+                      {!hideFinancials && (
+                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-800">
+                          ${c.precioUnitario.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      )}
 
                       <td className="py-3 px-4 text-center">
                         <div className="inline-flex items-center gap-1">

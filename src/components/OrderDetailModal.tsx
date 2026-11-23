@@ -25,6 +25,7 @@ import {
 import type { Order, Provider, Client, Role, OrderStatus, ManifestDocument } from '../types.ts';
 import { calculateSla, canFinalizeOrder } from '../domain/rules.ts';
 import { StatusBadge, ManifestBadge, SlaBadge } from './StatusBadge.tsx';
+import { apiFetch } from '../utils/api.ts';
 
 interface OrderDetailModalProps {
   order: Order | null;
@@ -97,7 +98,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
   const activeProviders = providers.filter((p) => p.activo);
   const isFinalized = order.estado === 'FINALIZADO';
-  const isAdmin = currentUserRole === 'ADMIN';
+  const canOperate = currentUserRole === 'ADMIN' || currentUserRole === 'USER';
+  const canViewFinancials = currentUserRole === 'ADMIN' || currentUserRole === 'USER';
+  const showConceptPrices = currentUserRole === 'ADMIN' || currentUserRole === 'USER' || currentUserRole === 'CLIENT';
 
   const operationalSteps: OrderStatus[] = [
     'CREADO',
@@ -119,15 +122,16 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/orders/${order.id}/assign-provider`, {
+      const payload: Record<string, any> = {
+        providerId: selectedProviderId,
+      };
+      if (canViewFinancials) {
+        payload.costoProveedor = parseFloat(costoProveedorInput);
+      }
+      const res = await apiFetch(`/api/orders/${order.id}/assign-provider`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          providerId: selectedProviderId,
-          costoProveedor: parseFloat(costoProveedorInput),
-          user: 'admin@logitrack.com',
-          role: currentUserRole,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -145,12 +149,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/orders/${order.id}/record-reception`, {
+      const res = await apiFetch(`/api/orders/${order.id}/record-reception`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           numeroRecepcion: numeroRecepcionInput,
-          user: 'admin@logitrack.com',
         }),
       });
       const data = await res.json();
@@ -172,13 +175,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/orders/${order.id}/record-invoice`, {
+      const res = await apiFetch(`/api/orders/${order.id}/record-invoice`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           numeroFacturacion: numeroFacturacionInput,
-          user: 'admin@logitrack.com',
-          role: currentUserRole,
         }),
       });
       const data = await res.json();
@@ -199,14 +200,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/orders/${order.id}/manifest/review`, {
+      const res = await apiFetch(`/api/orders/${order.id}/manifest/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action,
           reason: action === 'REJECT' ? rejectionReason : undefined,
-          user: 'admin@logitrack.com',
-          role: currentUserRole,
         }),
       });
       const data = await res.json();
@@ -233,13 +232,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/orders/${order.id}/reopen`, {
+      const res = await apiFetch(`/api/orders/${order.id}/reopen`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           motivo: reopenReason,
-          user: 'admin@logitrack.com',
-          role: currentUserRole,
         }),
       });
       const data = await res.json();
@@ -380,7 +377,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <FileCheck className="h-4 w-4" />
             Manifiestos y Revisiones ({order.manifiestos.length})
           </button>
-          {isAdmin && (
+          {canOperate && (
             <button
               onClick={() => setActiveTab('historial')}
               className={`py-3 border-b-2 flex items-center gap-2 transition ${
@@ -399,9 +396,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
           {/* TAB 1: DETALLES DE LA ORDEN & CONCEPTOS */}
           {activeTab === 'operacion' && (
-            <div className={`grid grid-cols-1 ${isAdmin ? 'lg:grid-cols-3' : ''} gap-6`}>
+            <div className={`grid grid-cols-1 ${canOperate ? 'lg:grid-cols-3' : ''} gap-6`}>
               {/* Main Column: Concepts table and order details */}
-              <div className={`${isAdmin ? 'lg:col-span-2' : ''} space-y-6`}>
+              <div className={`${canOperate ? 'lg:col-span-2' : ''} space-y-6`}>
                 {/* Desglose de Conceptos con formato reglamentario solicitado */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
                   <div className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center justify-between">
@@ -421,8 +418,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                           <th className="py-2.5 px-3">UNIDAD</th>
                           <th className="py-2.5 px-3">ITEM</th>
                           <th className="py-2.5 px-3">DESCRIPCIÓN</th>
-                          <th className="py-2.5 px-3 text-right">PRECIO UNITARIO</th>
-                          <th className="py-2.5 px-3 text-right">PRECIO TOTAL</th>
+                          {showConceptPrices && (
+                            <>
+                              <th className="py-2.5 px-3 text-right">PRECIO UNITARIO</th>
+                              <th className="py-2.5 px-3 text-right">PRECIO TOTAL</th>
+                            </>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -459,26 +460,32 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                                   </div>
                                 )}
                               </td>
-                              <td className="py-2.5 px-3 text-right font-mono text-slate-700">
-                                {precioUnitFormatted}
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                                {precioTotalFormatted}
-                              </td>
+                              {showConceptPrices && (
+                                <>
+                                  <td className="py-2.5 px-3 text-right font-mono text-slate-700">
+                                    {precioUnitFormatted}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                                    {precioTotalFormatted}
+                                  </td>
+                                </>
+                              )}
                             </tr>
                           );
                         })}
                       </tbody>
-                      <tfoot>
-                        <tr className="bg-slate-50 border-t-2 border-slate-300 font-bold text-xs">
-                          <td colSpan={4} className="py-3 px-3 text-right text-slate-700 uppercase tracking-wider">
-                            Costo total la suma del Precio Total:
-                          </td>
-                          <td colSpan={2} className="py-3 px-3 text-right font-mono text-base font-black text-indigo-700">
-                            $ {totalConceptsSum.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      </tfoot>
+                      {showConceptPrices && (
+                        <tfoot>
+                          <tr className="bg-slate-50 border-t-2 border-slate-300 font-bold text-xs">
+                            <td colSpan={4} className="py-3 px-3 text-right text-slate-700 uppercase tracking-wider">
+                              Costo total la suma del Precio Total:
+                            </td>
+                            <td colSpan={2} className="py-3 px-3 text-right font-mono text-base font-black text-indigo-700">
+                              $ {totalConceptsSum.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
                     </table>
                   </div>
                 </div>
@@ -638,11 +645,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   </div>
                 </div>
 
-                {/* Si es Admin, mostrar resumen de costos y utilidad */}
-                {isAdmin && (
+                {canViewFinancials && (
                   <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-2">
                     <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                      Resumen Financiero (Solo Administrador)
+                      Resumen Financiero de la Orden
                     </span>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                       <div className="bg-white p-2.5 rounded-xl border border-slate-200">
@@ -678,8 +684,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 )}
               </div>
 
-              {/* Right Column: Operational Controls for Admin */}
-              {isAdmin && (
+              {/* Right Column: Operational Controls for Admin and Operational User */}
+              {canOperate && (
                 <div className="space-y-5">
                   {/* Asignación / Reasignación de Proveedor (Regla 2) */}
                   <div className="bg-white rounded-2xl p-4 border border-slate-200 space-y-3">
@@ -693,7 +699,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     <p className="text-[11px] text-slate-500">
                       {order.proveedorId
                         ? `Actualmente asignado a: ${order.proveedorNombre}. Si reasigna, se conservará el anterior en el historial.`
-                        : 'Seleccione un transportista activo y registre su costo para iniciar inmediatamente la recolección en EN_PROCESO.'}
+                        : 'Seleccione un transportista activo para iniciar inmediatamente la recolección en EN_PROCESO.'}
                     </p>
 
                     <form onSubmit={handleAssignProvider} className="space-y-2.5">
@@ -717,25 +723,27 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                         </select>
                       </div>
 
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Costo del Proveedor ($ MXN)
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-2 text-xs text-slate-400">$</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            placeholder="Ej. 2500.00"
-                            value={costoProveedorInput}
-                            onChange={(e) => setCostoProveedorInput(e.target.value)}
-                            disabled={isFinalized}
-                            className="w-full text-xs rounded-xl border border-slate-300 pl-6 pr-3 py-2 text-right bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
-                            required
-                          />
+                      {canViewFinancials && (
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Costo del Proveedor ($ MXN)
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-xs text-slate-400">$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder="Ej. 2500.00"
+                              value={costoProveedorInput}
+                              onChange={(e) => setCostoProveedorInput(e.target.value)}
+                              disabled={isFinalized}
+                              className="w-full text-xs rounded-xl border border-slate-300 pl-6 pr-3 py-2 text-right bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
+                              required
+                            />
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       <button
                         type="submit"
@@ -890,8 +898,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           {/* TAB 2: MANIFIESTOS */}
           {activeTab === 'manifiesto' && (
             <div className="space-y-6">
-              {/* Review card if current manifest is PENDING and user is ADMIN */}
-              {isAdmin && order.manifiestoActual && order.manifiestoActual.status === 'PENDING' && (
+              {/* Review card if current manifest is PENDING and user is ADMIN or USER */}
+              {canOperate && order.manifiestoActual && order.manifiestoActual.status === 'PENDING' && (
                 <div className="bg-yellow-50/80 rounded-2xl p-5 border border-yellow-300 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -1027,8 +1035,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: HISTORIAL DE AUDITORIA (Admin) */}
-          {activeTab === 'historial' && isAdmin && (
+          {/* TAB 3: HISTORIAL DE AUDITORIA (Admin / User) */}
+          {activeTab === 'historial' && canOperate && (
             <div className="space-y-4">
               <div className="text-xs text-slate-500">
                 Registro inmutable de eventos, cambios de estado operativo, reasignaciones y revisiones documentales.

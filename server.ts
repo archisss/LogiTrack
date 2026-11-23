@@ -15,6 +15,7 @@ import type {
   ManifestDocument,
   HistoryEntry,
   ServiceLocation,
+  AppUser,
 } from './src/types.ts';
 import {
   calculateOrderTotals,
@@ -49,6 +50,17 @@ import {
   dbCreateOrder,
   dbUpdateOrder,
   dbResetData,
+  type SeedUser,
+  verifyPassword,
+  dbGetUsers,
+  dbGetUserById,
+  dbGetUserByEmailWithPassword,
+  dbCreateUser,
+  dbUpdateUser,
+  dbDeleteUser,
+  dbCreateSession,
+  dbGetSessionUser,
+  dbDeleteSession,
 } from './src/server/db.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -838,6 +850,81 @@ function getInitialSeedOrders(): Order[] {
   ];
 }
 
+const SEED_USERS: SeedUser[] = [
+  {
+    id: 'user-admin',
+    nombre: 'Administrador General',
+    email: 'admin@logitrack.com',
+    password: 'Admin2026!',
+    role: 'ADMIN',
+    entityId: null,
+    activo: true,
+  },
+  {
+    id: 'user-operador',
+    nombre: 'Usuario Operativo y Reportes',
+    email: 'usuario@logitrack.com',
+    password: 'User2026!',
+    role: 'USER',
+    entityId: null,
+    activo: true,
+  },
+  {
+    id: 'user-prov-1',
+    nombre: 'Transportes Ecológicos del Centro',
+    email: 'contacto@tecolgicos.mx',
+    password: 'Prov2026!',
+    role: 'PROVIDER',
+    entityId: 'prov-1',
+    activo: true,
+  },
+  {
+    id: 'user-prov-2',
+    nombre: 'Fletes Rápidos y Logística Industrial',
+    email: 'operaciones@fletesrapidos.com',
+    password: 'Prov2026!',
+    role: 'PROVIDER',
+    entityId: 'prov-2',
+    activo: true,
+  },
+  {
+    id: 'user-prov-3',
+    nombre: 'Recolecciones Especializadas del Bajío',
+    email: 'bajio@recolecciones.com',
+    password: 'Prov2026!',
+    role: 'PROVIDER',
+    entityId: 'prov-3',
+    activo: true,
+  },
+  {
+    id: 'user-client-1',
+    nombre: 'Bimbo México SA de CV',
+    email: 'logistica@bimbo.com',
+    password: 'Client2026!',
+    role: 'CLIENT',
+    entityId: 'client-1',
+    activo: true,
+  },
+  {
+    id: 'user-client-2',
+    nombre: 'Grupo Modelo S de RL de CV',
+    email: 'recolecciones@grupomodelo.com',
+    password: 'Client2026!',
+    role: 'CLIENT',
+    entityId: 'client-2',
+    activo: true,
+  },
+  {
+    id: 'user-client-3',
+    nombre: 'Femsa Coca-Cola México',
+    email: 'ambiental@femsa.com',
+    password: 'Client2026!',
+    role: 'CLIENT',
+    entityId: 'client-3',
+    activo: true,
+  },
+];
+
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
@@ -852,6 +939,7 @@ async function startServer() {
       catalogConcepts: SEED_CATALOG_CONCEPTS,
       serviceLocations: SEED_SERVICE_LOCATIONS,
       orders: getInitialSeedOrders(),
+      users: SEED_USERS,
     });
   } catch (dbErr) {
     console.error('[DB] Error inicializando base de datos PostgreSQL:', dbErr);
@@ -868,9 +956,17 @@ async function startServer() {
     return newEntry;
   }
 
+  // Helper to resolve authenticated session user from Authorization Bearer header
+  async function getAuthUser(req: Request): Promise<AppUser | null> {
+    const authHeader = req.headers.authorization || '';
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!match) return null;
+    return await dbGetSessionUser(match[1].trim());
+  }
+
   // --- API ROUTES ---
 
-  // Health check & DB Status
+  // Health check & DB Status (Public)
   app.get('/api/health', async (req: Request, res: Response) => {
     const dbStatus = await getDbStatus();
     res.json({
@@ -880,17 +976,213 @@ async function startServer() {
     });
   });
 
+  // --- AUTHENTICATION ROUTES ---
+  app.post('/api/auth/login', async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Ingrese su correo electrónico y contraseña' });
+      }
+
+      const userRecord = await dbGetUserByEmailWithPassword(String(email));
+      if (!userRecord) {
+        return res.status(401).json({ error: 'Credenciales incorrectas' });
+      }
+      if (!userRecord.activo) {
+        return res.status(403).json({ error: 'Este usuario se encuentra desactivado. Contacte al administrador.' });
+      }
+
+      const valid = verifyPassword(String(password), userRecord.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ error: 'Credenciales incorrectas' });
+      }
+
+      const token = await dbCreateSession(userRecord.id);
+      const { passwordHash: _ignored, ...safeUser } = userRecord;
+      res.json({ token, user: safeUser });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al iniciar sesión', details: err.message });
+    }
+  });
+
+  app.get('/api/auth/me', async (req: Request, res: Response) => {
+    try {
+      const user = await getAuthUser(req);
+      if (!user) {
+        return res.status(401).json({ error: 'Sesión no válida o expirada' });
+      }
+      res.json({ user });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al verificar sesión', details: err.message });
+    }
+  });
+
+  app.post('/api/auth/logout', async (req: Request, res: Response) => {
+    try {
+      const authHeader = req.headers.authorization || '';
+      const match = authHeader.match(/^Bearer\s+(.+)$/i);
+      if (match) {
+        await dbDeleteSession(match[1].trim());
+      }
+      res.json({ message: 'Sesión cerrada correctamente' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al cerrar sesión', details: err.message });
+    }
+  });
+
+  // --- USERS MANAGEMENT (Admin Only) ---
+  app.get('/api/users', async (req: Request, res: Response) => {
+    try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Solo el administrador puede consultar la tabla de usuarios' });
+      }
+      const users = await dbGetUsers();
+      res.json(users);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al obtener usuarios', details: err.message });
+    }
+  });
+
+  app.post('/api/users', async (req: Request, res: Response) => {
+    try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Solo el administrador puede crear usuarios' });
+      }
+
+      const { nombre, email, password, role, entityId, activo } = req.body;
+      if (!nombre || !String(nombre).trim()) {
+        return res.status(400).json({ error: 'El nombre del usuario es obligatorio' });
+      }
+      if (!email || !String(email).trim()) {
+        return res.status(400).json({ error: 'El correo electrónico es obligatorio' });
+      }
+      if (!password || String(password).length < 6) {
+        return res.status(400).json({ error: 'La contraseña es obligatoria (mínimo 6 caracteres)' });
+      }
+      if (!['ADMIN', 'USER', 'PROVIDER', 'CLIENT'].includes(role)) {
+        return res.status(400).json({ error: 'Rol de usuario inválido' });
+      }
+      if ((role === 'PROVIDER' || role === 'CLIENT') && !entityId) {
+        return res.status(400).json({ error: 'Debe vincular el transportista o empresa cliente correspondiente' });
+      }
+
+      const existing = await dbGetUserByEmailWithPassword(String(email));
+      if (existing) {
+        return res.status(400).json({ error: `Ya existe un usuario con el correo "${String(email).trim().toLowerCase()}"` });
+      }
+
+      const created = await dbCreateUser({
+        id: `user-${Date.now()}`,
+        nombre: String(nombre).trim(),
+        email: String(email).trim().toLowerCase(),
+        password: String(password),
+        role: role as Role,
+        entityId: role === 'PROVIDER' || role === 'CLIENT' ? String(entityId) : null,
+        activo: activo !== false,
+      });
+
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al crear usuario', details: err.message });
+    }
+  });
+
+  app.put('/api/users/:id', async (req: Request, res: Response) => {
+    try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Solo el administrador puede editar usuarios' });
+      }
+
+      const target = await dbGetUserById(req.params.id);
+      if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+      const { nombre, email, password, role, entityId, activo } = req.body;
+      if (email) {
+        const duplicate = await dbGetUserByEmailWithPassword(String(email));
+        if (duplicate && duplicate.id !== req.params.id) {
+          return res.status(400).json({ error: `El correo "${String(email).trim().toLowerCase()}" ya está en uso` });
+        }
+      }
+      if (password && String(password).length > 0 && String(password).length < 6) {
+        return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+      }
+
+      const nextRole = (role || target.role) as Role;
+      const nextEntityId =
+        nextRole === 'PROVIDER' || nextRole === 'CLIENT'
+          ? (entityId !== undefined ? entityId : target.entityId)
+          : null;
+
+      if ((nextRole === 'PROVIDER' || nextRole === 'CLIENT') && !nextEntityId) {
+        return res.status(400).json({ error: 'Debe seleccionar la empresa vinculada al perfil' });
+      }
+
+      const updated = await dbUpdateUser(req.params.id, {
+        nombre,
+        email,
+        password: password || undefined,
+        role: nextRole,
+        entityId: nextEntityId,
+        activo,
+      });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al actualizar usuario', details: err.message });
+    }
+  });
+
+  app.delete('/api/users/:id', async (req: Request, res: Response) => {
+    try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Solo el administrador puede eliminar usuarios' });
+      }
+      if (authUser.id === req.params.id) {
+        return res.status(400).json({ error: 'No puede eliminar su propio usuario administrador activo' });
+      }
+
+      const deleted = await dbDeleteUser(req.params.id);
+      if (!deleted) return res.status(404).json({ error: 'Usuario no encontrado' });
+      res.json({ message: 'Usuario eliminado exitosamente' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Error al eliminar usuario', details: err.message });
+    }
+  });
+
   // Providers, Clients, Catalog concepts & Service Locations (CEDIs)
   app.get('/api/config', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+
       const [providers, clients, catalogConcepts, serviceLocations, dbStatus] = await Promise.all([
         dbGetProviders(),
         dbGetClients(),
         dbGetCatalogConcepts(),
         dbGetServiceLocations(),
-        getDbStatus(),
+        authUser.role === 'ADMIN' ? getDbStatus() : Promise.resolve(null),
       ]);
-      res.json({ providers, clients, catalogConcepts, serviceLocations, database: dbStatus });
+
+      // Hide unit pricing in catalogConcepts only when role is PROVIDER
+      const safeCatalogConcepts =
+        authUser.role === 'PROVIDER'
+          ? catalogConcepts.map(c => ({ ...c, precioUnitario: 0 }))
+          : catalogConcepts;
+
+      res.json({
+        providers,
+        clients,
+        catalogConcepts: safeCatalogConcepts,
+        serviceLocations,
+        ...(dbStatus ? { database: dbStatus } : {}),
+      });
     } catch (err: any) {
       res.status(500).json({ error: 'Error al obtener configuración', details: err.message });
     }
@@ -899,6 +1191,8 @@ async function startServer() {
   // --- CRUD PROVEEDORES ---
   app.get('/api/providers', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
       const providers = await dbGetProviders();
       res.json(providers);
     } catch (err: any) {
@@ -907,6 +1201,11 @@ async function startServer() {
   });
 
   app.post('/api/providers', async (req: Request, res: Response) => {
+    const authUser = await getAuthUser(req);
+    if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+    if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+      return res.status(403).json({ error: 'No tiene permisos para registrar transportistas' });
+    }
     const { nombre, rfc, telefono, email, activo, direccion, autorizacionDocumento } = req.body;
     if (!nombre || String(nombre).trim().length === 0) {
       return res.status(400).json({ error: 'El nombre o razón social del transportista es obligatorio' });
@@ -961,6 +1260,11 @@ async function startServer() {
 
   app.put('/api/providers/:id', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para editar transportistas' });
+      }
       const provider = await dbGetProviderById(req.params.id);
       if (!provider) {
         return res.status(404).json({ error: 'Transportista no encontrado' });
@@ -1021,6 +1325,11 @@ async function startServer() {
 
   app.delete('/api/providers/:id', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para eliminar transportistas' });
+      }
       const provider = await dbGetProviderById(req.params.id);
       if (!provider) {
         return res.status(404).json({ error: 'Transportista no encontrado' });
@@ -1048,14 +1357,25 @@ async function startServer() {
   // --- CRUD CATALOGO DE CONCEPTOS ---
   app.get('/api/catalog-concepts', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
       const concepts = await dbGetCatalogConcepts();
-      res.json(concepts);
+      res.json(
+        authUser.role === 'PROVIDER'
+          ? concepts.map(c => ({ ...c, precioUnitario: 0 }))
+          : concepts
+      );
     } catch (err: any) {
       res.status(500).json({ error: 'Error al obtener conceptos', details: err.message });
     }
   });
 
   app.post('/api/catalog-concepts', async (req: Request, res: Response) => {
+    const authUser = await getAuthUser(req);
+    if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+    if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+      return res.status(403).json({ error: 'No tiene permisos para modificar el catálogo' });
+    }
     const { item, unidad, descripcion, precioUnitario } = req.body;
     // Regla 1: ITEM opcional, DESCRIPCION obligatoria
     if (!descripcion || String(descripcion).trim().length === 0) {
@@ -1081,6 +1401,11 @@ async function startServer() {
 
   app.put('/api/catalog-concepts/:id', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para modificar el catálogo' });
+      }
       const concept = await dbGetCatalogConceptById(req.params.id);
       if (!concept) {
         return res.status(404).json({ error: 'Concepto no encontrado en el catálogo' });
@@ -1095,7 +1420,9 @@ async function startServer() {
       }
       if (item !== undefined) concept.item = String(item).trim();
       if (unidad !== undefined) concept.unidad = String(unidad).trim().toUpperCase();
-      if (precioUnitario !== undefined) concept.precioUnitario = Number(precioUnitario) || 0;
+      if (precioUnitario !== undefined) {
+        concept.precioUnitario = Number(precioUnitario) || 0;
+      }
 
       const updated = await dbUpdateCatalogConcept(req.params.id, concept);
       res.json(updated);
@@ -1106,6 +1433,11 @@ async function startServer() {
 
   app.delete('/api/catalog-concepts/:id', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para modificar el catálogo' });
+      }
       const concept = await dbGetCatalogConceptById(req.params.id);
       if (!concept) {
         return res.status(404).json({ error: 'Concepto no encontrado en el catálogo' });
@@ -1120,6 +1452,8 @@ async function startServer() {
   // --- CRUD UBICACIONES PARA SERVICIO (CEDIs) ---
   app.get('/api/service-locations', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
       const locations = await dbGetServiceLocations();
       res.json(locations);
     } catch (err: any) {
@@ -1129,6 +1463,11 @@ async function startServer() {
 
   app.post('/api/service-locations', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para registrar ubicaciones' });
+      }
       const { division, cedi, direccion, activo } = req.body;
       if (!division || String(division).trim().length === 0) {
         return res.status(400).json({ error: 'La división (ej. Centro, Sur, Norte) es obligatoria' });
@@ -1175,6 +1514,11 @@ async function startServer() {
 
   app.put('/api/service-locations/:id', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para editar ubicaciones' });
+      }
       const location = await dbGetServiceLocationById(req.params.id);
       if (!location) {
         return res.status(404).json({ error: 'Ubicación / CEDI no encontrado' });
@@ -1221,6 +1565,11 @@ async function startServer() {
 
   app.delete('/api/service-locations/:id', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para eliminar ubicaciones' });
+      }
       const location = await dbGetServiceLocationById(req.params.id);
       if (!location) {
         return res.status(404).json({ error: 'Ubicación / CEDI no encontrado' });
@@ -1232,15 +1581,22 @@ async function startServer() {
     }
   });
 
-  // Get orders (sanitized by role)
+  // Get orders (sanitized by authenticated user role)
   app.get('/api/orders', async (req: Request, res: Response) => {
     try {
-      const role = (req.query.role as Role) || 'ADMIN';
-      const entityId = req.query.entityId as string;
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+
+      const effectiveRole: Role =
+        authUser.role === 'ADMIN' ? ((req.query.role as Role) || 'ADMIN') : authUser.role;
+      const effectiveEntityId =
+        authUser.role === 'ADMIN'
+          ? (req.query.entityId as string | undefined)
+          : (authUser.entityId || undefined);
 
       const allOrders = await dbGetOrders();
       const sanitizedList = allOrders
-        .map(o => sanitizeOrderByRole(o, role, entityId))
+        .map(o => sanitizeOrderByRole(o, effectiveRole, effectiveEntityId))
         .filter((o): o is Order => o !== null);
 
       res.json(sanitizedList);
@@ -1252,14 +1608,22 @@ async function startServer() {
   // Get single order
   app.get('/api/orders/:id', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+
       const order = await dbGetOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: 'Orden no encontrada' });
       }
-      const role = (req.query.role as Role) || 'ADMIN';
-      const entityId = req.query.entityId as string;
 
-      const sanitized = sanitizeOrderByRole(order, role, entityId);
+      const effectiveRole: Role =
+        authUser.role === 'ADMIN' ? ((req.query.role as Role) || 'ADMIN') : authUser.role;
+      const effectiveEntityId =
+        authUser.role === 'ADMIN'
+          ? (req.query.entityId as string | undefined)
+          : (authUser.entityId || undefined);
+
+      const sanitized = sanitizeOrderByRole(order, effectiveRole, effectiveEntityId);
       if (!sanitized) {
         return res.status(403).json({ error: 'Acceso no autorizado a esta orden' });
       }
@@ -1269,15 +1633,20 @@ async function startServer() {
     }
   });
 
-  // Create order (Admin only)
+  // Create order (Admin or Operational User)
   app.post('/api/orders', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para crear órdenes' });
+      }
+
       const {
         clienteId,
         conceptos,
         proveedorId,
         costoProveedor,
-        user,
         numeroPedido,
         ubicacionServicio,
         solicitoNombre,
@@ -1313,12 +1682,10 @@ async function startServer() {
         return res.status(400).json({ error: 'Se requiere al menos un concepto en la orden' });
       }
 
-      // Validar que cada concepto tenga descripción obligatoria
       if (conceptos.some((c: any) => !c.descripcion || String(c.descripcion).trim().length === 0)) {
         return res.status(400).json({ error: 'La descripción es obligatoria para cada concepto de la orden' });
       }
 
-      // Calcular importes de conceptos estrictamente con Decimal en el servidor
       const sanitizedConceptos: ItemConcept[] = conceptos.map((c: any, idx: number) => {
         const cantidad = Number(c.cantidadOrdenada ?? c.cantidad ?? 1);
         const precioUnitario = Number(c.precioUnitario) || 0;
@@ -1336,7 +1703,6 @@ async function startServer() {
         };
       });
 
-      // Validar asignación opcional de proveedor inicial
       let assignedProv: Provider | null = null;
       let provCostNumber: number | null = null;
       let initialStatus: OrderStatus = 'CREADO';
@@ -1352,7 +1718,6 @@ async function startServer() {
           return res.status(400).json({ error: 'Debe especificar un costo de proveedor válido (mayor o igual a cero)' });
         }
         provCostNumber = new Decimal(costoProveedor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
-        // Iniciar inmediatamente en EN_PROCESO para cronometraje exacto
         initialStatus = 'EN_PROCESO';
         assignedAt = new Date().toISOString();
       }
@@ -1399,12 +1764,11 @@ async function startServer() {
         historial: [],
       };
 
-      // Historial inicial
       addHistory(newOrder, {
         action: 'CREACION_ORDEN',
         newStatus: initialStatus,
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
+        user: authUser.email,
+        role: authUser.role,
         comment: assignedProv
           ? `Orden creada con proveedor ${assignedProv.nombre} asignado; recolección iniciada inmediatamente en EN_PROCESO.`
           : 'Orden creada sin proveedor asignado en estado CREADO.',
@@ -1415,33 +1779,35 @@ async function startServer() {
           action: 'ASIGNACION_PROVEEDOR',
           prevStatus: 'CREADO',
           newStatus: 'EN_PROCESO',
-          user: user || 'admin@logitrack.com',
-          role: 'ADMIN',
+          user: authUser.email,
+          role: authUser.role,
           comment: `Proveedor asignado: ${assignedProv.nombre}. Costo: $${provCostNumber?.toFixed(2)} MXN. Orden iniciada inmediatamente en EN_PROCESO para cronometraje.`,
           details: { proveedorId: assignedProv.id, costoProveedor: provCostNumber },
         });
       }
 
       const created = await dbCreateOrder(newOrder);
-      res.status(201).json(created);
+      res.status(201).json(sanitizeOrderByRole(created, authUser.role));
     } catch (err: any) {
       res.status(500).json({ error: 'Error al registrar orden en la base de datos', details: err.message });
     }
   });
 
-  // Assign or reassign provider (Admin only)
+  // Assign or reassign provider (Admin or Operational User)
   app.post('/api/orders/:id/assign-provider', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'Un proveedor o cliente no puede asignar órdenes' });
+      }
+
       const order = await dbGetOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: 'Orden no encontrada' });
       }
 
-      const { providerId, costoProveedor, user, role } = req.body;
-
-      if (role === 'PROVIDER') {
-        return res.status(403).json({ error: 'Un proveedor nunca puede asignarse órdenes a sí mismo' });
-      }
+      const { providerId, costoProveedor } = req.body;
 
       if (!providerId) {
         return res.status(400).json({ error: 'Debe seleccionar un proveedor' });
@@ -1458,15 +1824,14 @@ async function startServer() {
       if (costoProveedor === undefined || costoProveedor === null || Number(costoProveedor) < 0) {
         return res.status(400).json({ error: 'Debe ingresar un costo de proveedor válido (mayor o igual a cero)' });
       }
+      const costNum = new Decimal(costoProveedor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
 
       const prevProvId = order.proveedorId;
       const prevProvName = order.proveedorNombre;
       const isReassignment = Boolean(prevProvId && prevProvId !== provider.id);
 
-      const costNum = new Decimal(costoProveedor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
       order.costoProveedor = costNum;
 
-      // Recalcular utilidad con Decimal
       const totals = calculateOrderTotals(order.conceptos, costNum);
       order.utilidadEstimada = totals.utilidadEstimada;
 
@@ -1476,7 +1841,6 @@ async function startServer() {
       order.assignedAt = nowIso;
 
       const prevStatus = order.estado;
-      // Iniciar inmediatamente en EN_PROCESO
       if (order.estado === 'CREADO' || order.estado === 'ASIGNANDO') {
         order.estado = 'EN_PROCESO';
         if (!order.startedAt) {
@@ -1489,8 +1853,8 @@ async function startServer() {
           action: 'REASIGNACION_PROVEEDOR',
           prevStatus,
           newStatus: order.estado,
-          user: user || 'admin@logitrack.com',
-          role: 'ADMIN',
+          user: authUser.email,
+          role: authUser.role,
           comment: `Reasignación de transportista: de '${prevProvName}' a '${provider.nombre}'. Costo registrado: $${costNum.toFixed(2)} MXN. Orden activa en EN_PROCESO.`,
           details: {
             proveedorAnteriorId: prevProvId,
@@ -1505,8 +1869,8 @@ async function startServer() {
           action: 'ASIGNACION_PROVEEDOR',
           prevStatus,
           newStatus: order.estado,
-          user: user || 'admin@logitrack.com',
-          role: 'ADMIN',
+          user: authUser.email,
+          role: authUser.role,
           comment: `Proveedor asignado: '${provider.nombre}'. Costo: $${costNum.toFixed(2)} MXN. Orden iniciada inmediatamente en EN_PROCESO para cronometraje exacto.`,
           details: {
             proveedorId: provider.id,
@@ -1517,22 +1881,28 @@ async function startServer() {
       }
 
       const updated = await dbUpdateOrder(order);
-      res.json(updated);
+      res.json(sanitizeOrderByRole(updated, authUser.role));
     } catch (err: any) {
       res.status(500).json({ error: 'Error al asignar transportista', details: err.message });
     }
   });
 
-  // Start process (Provider only)
+  // Start process (Provider or Admin preview)
   app.post('/api/orders/:id/start-process', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'PROVIDER' && authUser.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Solo el proveedor asignado puede iniciar esta recolección' });
+      }
+
       const order = await dbGetOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: 'Orden no encontrada' });
       }
 
-      const { user, providerId } = req.body;
-      if (providerId && order.proveedorId !== providerId) {
+      const targetProviderId = authUser.role === 'PROVIDER' ? authUser.entityId : req.body.providerId;
+      if (targetProviderId && order.proveedorId !== targetProviderId) {
         return res.status(403).json({ error: 'Solo el proveedor asignado puede iniciar esta recolección' });
       }
 
@@ -1549,21 +1919,27 @@ async function startServer() {
         action: 'INICIO_RECOLECCION',
         prevStatus,
         newStatus: 'EN_PROCESO',
-        user: user || order.proveedorNombre || 'Proveedor',
+        user: authUser.email || order.proveedorNombre || 'Proveedor',
         role: 'PROVIDER',
         comment: 'El proveedor asignado ha iniciado el servicio de recolección en ruta.',
       });
 
       const updated = await dbUpdateOrder(order);
-      res.json(updated);
+      res.json(sanitizeOrderByRole(updated, authUser.role, targetProviderId || undefined));
     } catch (err: any) {
       res.status(500).json({ error: 'Error al iniciar recolección', details: err.message });
     }
   });
 
-  // Record reception number (Admin only)
+  // Record reception number (Admin or Operational User)
   app.post('/api/orders/:id/record-reception', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para registrar recepción' });
+      }
+
       const order = await dbGetOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: 'Orden no encontrada' });
@@ -1575,7 +1951,7 @@ async function startServer() {
         });
       }
 
-      const { numeroRecepcion, user } = req.body;
+      const { numeroRecepcion } = req.body;
       if (!numeroRecepcion || String(numeroRecepcion).trim().length === 0) {
         return res.status(400).json({ error: 'El número de recepción no puede estar vacío' });
       }
@@ -1585,7 +1961,7 @@ async function startServer() {
       const nowIso = new Date().toISOString();
 
       order.numeroRecepcion = cleanNumber;
-      order.recepcionRegistradaPor = user || 'admin@logitrack.com';
+      order.recepcionRegistradaPor = authUser.email;
       order.receptionRecordedAt = nowIso;
 
       if (order.estado === 'ASIGNANDO' || order.estado === 'EN_PROCESO') {
@@ -1596,16 +1972,15 @@ async function startServer() {
         action: 'REGISTRO_RECEPCION',
         prevStatus,
         newStatus: order.estado,
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
-        comment: `Número de recepción '${cleanNumber}' registrado exitosamente por ${user || 'Administrador'}.`,
+        user: authUser.email,
+        role: authUser.role,
+        comment: `Número de recepción '${cleanNumber}' registrado exitosamente por ${authUser.nombre}.`,
         details: { numeroRecepcion: cleanNumber },
       });
 
-      // Si había una facturación pendiente que se ingresó antes de completar, se aplica ahora
       if (order.facturacionPendiente && order.estado === 'COMPLETO') {
         order.numeroFacturacion = order.facturacionPendiente;
-        order.facturacionRegistradaPor = user || 'admin@logitrack.com';
+        order.facturacionRegistradaPor = authUser.email;
         order.invoicedAt = new Date().toISOString();
         order.facturacionPendiente = null;
         order.estado = 'FACTURADO';
@@ -1614,13 +1989,12 @@ async function startServer() {
           action: 'APLICACION_FACTURA_PENDIENTE',
           prevStatus: 'COMPLETO',
           newStatus: 'FACTURADO',
-          user: user || 'admin@logitrack.com',
-          role: 'ADMIN',
+          user: authUser.email,
+          role: authUser.role,
           comment: `Factura pendiente '${order.numeroFacturacion}' aplicada automáticamente al completar la orden.`,
         });
       }
 
-      // Evaluar centralmente condición de finalización
       const transition = evaluateOrderStateTransition(order);
       if (transition.changed) {
         const prevTransitionStatus = order.estado;
@@ -1639,23 +2013,30 @@ async function startServer() {
       }
 
       const updated = await dbUpdateOrder(order);
-      res.json(updated);
+      res.json(sanitizeOrderByRole(updated, authUser.role));
     } catch (err: any) {
       res.status(500).json({ error: 'Error al registrar número de recepción', details: err.message });
     }
   });
 
-  // Upload Manifest (Provider only)
+  // Upload Manifest (Provider or Admin preview)
   app.post('/api/orders/:id/manifest/upload', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'PROVIDER' && authUser.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Solo el proveedor asignado puede subir el manifiesto' });
+      }
+
       const order = await dbGetOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: 'Orden no encontrada' });
       }
 
-      const { fileName, fileSize, fileDataUrl, user, providerId } = req.body;
+      const { fileName, fileSize, fileDataUrl } = req.body;
+      const targetProviderId = authUser.role === 'PROVIDER' ? authUser.entityId : req.body.providerId;
 
-      if (providerId && order.proveedorId !== providerId) {
+      if (targetProviderId && order.proveedorId !== targetProviderId) {
         return res.status(403).json({ error: 'Solo el proveedor asignado puede subir el manifiesto de esta orden' });
       }
 
@@ -1666,7 +2047,6 @@ async function startServer() {
       const nextVersion = (order.manifiestos.length > 0 ? Math.max(...order.manifiestos.map(m => m.version)) : 0) + 1;
       const nowIso = new Date().toISOString();
 
-      // Marcar cualquier manifiesto anterior como no vigente
       order.manifiestos.forEach(m => {
         m.isCurrent = false;
       });
@@ -1676,7 +2056,7 @@ async function startServer() {
         fileName: String(fileName).trim(),
         fileSize: fileSize || '1.2 MB',
         fileDataUrl: fileDataUrl || `data:application/pdf;base64,JVBERi0xLjQK...[mock-secure-doc-v${nextVersion}]`,
-        uploadedBy: user || order.proveedorNombre || 'Proveedor',
+        uploadedBy: authUser.email || order.proveedorNombre || 'Proveedor',
         uploadedAt: nowIso,
         status: 'PENDING',
         isCurrent: true,
@@ -1688,32 +2068,34 @@ async function startServer() {
 
       addHistory(order, {
         action: 'CARGA_MANIFIESTO',
-        user: user || 'Proveedor',
+        user: authUser.email,
         role: 'PROVIDER',
-        comment: `Manifiesto versión ${nextVersion} ('${newManifest.fileName}') subido. Estado: PENDING (pendiente de revisión por administración).`,
+        comment: `Manifiesto versión ${nextVersion} ('${newManifest.fileName}') subido. Estado: PENDING (pendiente de revisión).`,
         details: { version: nextVersion, fileName: newManifest.fileName, status: 'PENDING' },
       });
 
       const updated = await dbUpdateOrder(order);
-      res.json(updated);
+      res.json(sanitizeOrderByRole(updated, authUser.role === 'ADMIN' ? 'PROVIDER' : authUser.role, targetProviderId || undefined));
     } catch (err: any) {
       res.status(500).json({ error: 'Error al subir manifiesto', details: err.message });
     }
   });
 
-  // Review Manifest (Admin only: Approve or Reject)
+  // Review Manifest (Admin or Operational User: Approve or Reject)
   app.post('/api/orders/:id/manifest/review', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para aprobar o rechazar manifiestos' });
+      }
+
       const order = await dbGetOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: 'Orden no encontrada' });
       }
 
-      const { action, reason, user, role } = req.body;
-
-      if (role && role !== 'ADMIN') {
-        return res.status(403).json({ error: 'Solo un administrador puede aprobar o rechazar un manifiesto' });
-      }
+      const { action, reason } = req.body;
 
       if (!order.manifiestoActual) {
         return res.status(400).json({ error: 'No hay ningún manifiesto cargado para revisar en esta orden' });
@@ -1728,38 +2110,37 @@ async function startServer() {
 
         order.manifiestoActual.status = 'REJECTED';
         order.manifiestoActual.rejectionReason = String(reason).trim();
-        order.manifiestoActual.reviewedBy = user || 'admin@logitrack.com';
+        order.manifiestoActual.reviewedBy = authUser.email;
         order.manifiestoActual.reviewedAt = nowIso;
         order.manifestReviewedAt = nowIso;
 
         addHistory(order, {
           action: 'RECHAZO_MANIFIESTO',
-          user: user || 'admin@logitrack.com',
-          role: 'ADMIN',
-          comment: `Manifiesto v${order.manifiestoActual.version} RECHAZADO por administración. Motivo: ${order.manifiestoActual.rejectionReason}`,
+          user: authUser.email,
+          role: authUser.role,
+          comment: `Manifiesto v${order.manifiestoActual.version} RECHAZADO. Motivo: ${order.manifiestoActual.rejectionReason}`,
           details: { version: order.manifiestoActual.version, motivo: order.manifiestoActual.rejectionReason },
         });
 
         const updated = await dbUpdateOrder(order);
-        return res.json(updated);
+        return res.json(sanitizeOrderByRole(updated, authUser.role));
       }
 
       if (action === 'APPROVE') {
         order.manifiestoActual.status = 'APPROVED';
         order.manifiestoActual.rejectionReason = undefined;
-        order.manifiestoActual.reviewedBy = user || 'admin@logitrack.com';
+        order.manifiestoActual.reviewedBy = authUser.email;
         order.manifiestoActual.reviewedAt = nowIso;
         order.manifestReviewedAt = nowIso;
 
         addHistory(order, {
           action: 'APROBACION_MANIFIESTO',
-          user: user || 'admin@logitrack.com',
-          role: 'ADMIN',
-          comment: `Manifiesto v${order.manifiestoActual.version} APROBADO por administración.`,
+          user: authUser.email,
+          role: authUser.role,
+          comment: `Manifiesto v${order.manifiestoActual.version} APROBADO por ${authUser.nombre}.`,
           details: { version: order.manifiestoActual.version },
         });
 
-        // Evaluar centralmente finalización
         const transition = evaluateOrderStateTransition(order);
         if (transition.changed) {
           const prevStatus = order.estado;
@@ -1778,7 +2159,7 @@ async function startServer() {
         }
 
         const updated = await dbUpdateOrder(order);
-        return res.json(updated);
+        return res.json(sanitizeOrderByRole(updated, authUser.role));
       }
 
       return res.status(400).json({ error: 'Acción de revisión inválida' });
@@ -1787,19 +2168,21 @@ async function startServer() {
     }
   });
 
-  // Record billing / invoice number (Admin only)
+  // Record billing / invoice number (Admin or Operational User)
   app.post('/api/orders/:id/record-invoice', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No está permitido que un proveedor o cliente registre facturación' });
+      }
+
       const order = await dbGetOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: 'Orden no encontrada' });
       }
 
-      const { numeroFacturacion, user, role } = req.body;
-
-      if (role && role !== 'ADMIN') {
-        return res.status(403).json({ error: 'No está permitido que un proveedor o cliente registre facturación' });
-      }
+      const { numeroFacturacion } = req.body;
 
       if (!numeroFacturacion || String(numeroFacturacion).trim().length === 0) {
         return res.status(400).json({ error: 'El número de facturación no puede estar vacío' });
@@ -1810,23 +2193,21 @@ async function startServer() {
       const isEdit = Boolean(order.numeroFacturacion);
       const prevInvoice = order.numeroFacturacion;
 
-      // Si se registra antes de completar, se conserva como pendiente
       if (order.estado !== 'COMPLETO' && order.estado !== 'FACTURADO' && order.estado !== 'FINALIZADO') {
         order.facturacionPendiente = cleanInvoice;
         addHistory(order, {
           action: 'FACTURACION_ANTICIPADA_PENDIENTE',
-          user: user || 'admin@logitrack.com',
-          role: 'ADMIN',
+          user: authUser.email,
+          role: authUser.role,
           comment: `Número de facturación '${cleanInvoice}' registrado como pendiente de aplicación (la orden está en ${order.estado} y no se saltan estados operativos).`,
           details: { facturacionPendiente: cleanInvoice },
         });
         const updated = await dbUpdateOrder(order);
-        return res.json(updated);
+        return res.json(sanitizeOrderByRole(updated, authUser.role));
       }
 
-      // Orden en COMPLETO o FACTURADO
       order.numeroFacturacion = cleanInvoice;
-      order.facturacionRegistradaPor = user || 'admin@logitrack.com';
+      order.facturacionRegistradaPor = authUser.email;
       order.invoicedAt = nowIso;
       order.facturacionPendiente = null;
 
@@ -1838,8 +2219,8 @@ async function startServer() {
           action: isEdit ? 'MODIFICACION_FACTURA' : 'REGISTRO_FACTURACION',
           prevStatus,
           newStatus: 'FACTURADO',
-          user: user || 'admin@logitrack.com',
-          role: 'ADMIN',
+          user: authUser.email,
+          role: authUser.role,
           comment: isEdit
             ? `Factura modificada de '${prevInvoice}' a '${cleanInvoice}'.`
             : `Factura '${cleanInvoice}' registrada. Orden pasa a FACTURADO.`,
@@ -1850,14 +2231,13 @@ async function startServer() {
           action: 'MODIFICACION_FACTURA',
           prevStatus: order.estado,
           newStatus: order.estado,
-          user: user || 'admin@logitrack.com',
-          role: 'ADMIN',
+          user: authUser.email,
+          role: authUser.role,
           comment: `Factura actualizada a '${cleanInvoice}'.`,
           details: { facturaAnterior: prevInvoice, nuevaFactura: cleanInvoice },
         });
       }
 
-      // Evaluar centralmente si pasa a FINALIZADO
       const transition = evaluateOrderStateTransition(order);
       if (transition.changed) {
         const prevTransStatus = order.estado;
@@ -1876,25 +2256,27 @@ async function startServer() {
       }
 
       const updated = await dbUpdateOrder(order);
-      res.json(updated);
+      res.json(sanitizeOrderByRole(updated, authUser.role));
     } catch (err: any) {
       res.status(500).json({ error: 'Error al registrar facturación', details: err.message });
     }
   });
 
-  // Reopen finalized order (Admin only)
+  // Reopen finalized order (Admin or Operational User)
   app.post('/api/orders/:id/reopen', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'Solo personal autorizado puede reabrir una orden finalizada' });
+      }
+
       const order = await dbGetOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: 'Orden no encontrada' });
       }
 
-      const { motivo, user, role } = req.body;
-
-      if (role && role !== 'ADMIN') {
-        return res.status(403).json({ error: 'Solo un administrador autorizado puede reabrir una orden finalizada' });
-      }
+      const { motivo } = req.body;
 
       if (order.estado !== 'FINALIZADO') {
         return res.status(400).json({ error: 'Solo se pueden reabrir órdenes que se encuentren en estado FINALIZADO' });
@@ -1912,28 +2294,38 @@ async function startServer() {
         action: 'REAPERTURA_ADMINISTRATIVA',
         prevStatus,
         newStatus: 'FACTURADO',
-        user: user || 'admin@logitrack.com',
-        role: 'ADMIN',
+        user: authUser.email,
+        role: authUser.role,
         comment: `Reapertura administrativa autorizada. Motivo: ${String(motivo).trim()}`,
         details: { justificacion: String(motivo).trim() },
       });
 
       const updated = await dbUpdateOrder(order);
-      res.json(updated);
+      res.json(sanitizeOrderByRole(updated, authUser.role));
     } catch (err: any) {
       res.status(500).json({ error: 'Error al reabrir orden', details: err.message });
     }
   });
 
-  // Acceptance Test Suite Runner
-  app.get('/api/acceptance-tests', (req: Request, res: Response) => {
+  // Acceptance Test Suite Runner (Admin Only)
+  app.get('/api/acceptance-tests', async (req: Request, res: Response) => {
+    const authUser = await getAuthUser(req);
+    if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+    if (authUser.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Solo el administrador tiene acceso a la suite de pruebas' });
+    }
     const suite = runAcceptanceTests();
     res.json(suite);
   });
 
-  // Reset database to seed in PostgreSQL
+  // Reset database to seed in PostgreSQL (Admin Only)
   app.post('/api/reset-data', async (req: Request, res: Response) => {
     try {
+      const authUser = await getAuthUser(req);
+      if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
+      if (authUser.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Solo el administrador puede reiniciar la base de datos' });
+      }
       await dbResetData({
         providers: SEED_PROVIDERS,
         clients: SEED_CLIENTS,

@@ -185,12 +185,13 @@ export function evaluateOrderStateTransition(order: Order): {
 
 /**
  * Sanitiza los datos de la orden según el rol del usuario para proteger información confidencial:
- * - Admin: ve todos los costos y la utilidad estimada.
+ * - Admin: ve todos los costos, totales globales y la utilidad estimada.
+ * - User: opera todo el sistema, ve precios unitarios, totales y márgenes por orden y genera reportes (sin métricas KPI globales ni secciones exclusivas de Admin).
  * - Provider: ve solo datos operativos necesarios, estado de manifiesto. NUNCA ve costoTotalCliente, subtotalCliente ni utilidad estimada.
  * - Client: ve sus importes de cliente (subtotal, total). NUNCA ve costoProveedor ni utilidad estimada. Solo ve manifiestos aprobados.
  */
 export function sanitizeOrderByRole(order: Order, role: Role, currentEntityId?: string): Order | null {
-  if (role === 'ADMIN') {
+  if (role === 'ADMIN' || role === 'USER') {
     return order;
   }
 

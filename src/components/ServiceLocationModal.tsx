@@ -12,7 +12,8 @@ import {
   Globe,
   Navigation,
 } from 'lucide-react';
-import type { ServiceLocation, ServiceLocationAddress } from '../types.ts';
+import type { ServiceLocation } from '../types.ts';
+import { apiFetch } from '../utils/api.ts';
 
 interface ServiceLocationModalProps {
   isOpen: boolean;
@@ -164,7 +165,7 @@ export const ServiceLocationModal: React.FC<ServiceLocationModalProps> = ({
 
     try {
       if (editingId) {
-        const res = await fetch(`/api/service-locations/${editingId}`, {
+        const res = await apiFetch(`/api/service-locations/${editingId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -173,7 +174,7 @@ export const ServiceLocationModal: React.FC<ServiceLocationModalProps> = ({
         if (!res.ok) throw new Error(data.error || 'Error al actualizar ubicación');
         setFeedback({ type: 'success', message: 'Ubicación / CEDI actualizado exitosamente.' });
       } else {
-        const res = await fetch('/api/service-locations', {
+        const res = await apiFetch('/api/service-locations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -195,7 +196,7 @@ export const ServiceLocationModal: React.FC<ServiceLocationModalProps> = ({
   const handleToggleActive = async (loc: ServiceLocation) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/service-locations/${loc.id}`, {
+      const res = await apiFetch(`/api/service-locations/${loc.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ activo: !loc.activo }),
@@ -216,7 +217,7 @@ export const ServiceLocationModal: React.FC<ServiceLocationModalProps> = ({
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/service-locations/${loc.id}`, {
+      const res = await apiFetch(`/api/service-locations/${loc.id}`, {
         method: 'DELETE',
       });
       const data = await res.json();

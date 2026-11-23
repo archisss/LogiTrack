@@ -1,7 +1,24 @@
 import pg from 'pg';
-import type { Provider, Client, CatalogConcept, Order, OrderStatus, ServiceLocation } from '../types.ts';
+import crypto from 'crypto';
+import type { Provider, Client, CatalogConcept, Order, OrderStatus, ServiceLocation, AppUser, Role } from '../types.ts';
 
 const { Pool } = pg;
+
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+export function verifyPassword(password: string, storedHash: string): boolean {
+  const parts = storedHash.split(':');
+  if (parts.length !== 2) return false;
+  const [salt, keyHex] = parts;
+  const keyBuf = Buffer.from(keyHex, 'hex');
+  const derivedBuf = crypto.scryptSync(password, salt, 64);
+  if (keyBuf.length !== derivedBuf.length) return false;
+  return crypto.timingSafeEqual(keyBuf, derivedBuf);
+}
 
 export interface DbStatus {
   connected: boolean;
@@ -47,12 +64,23 @@ export async function getDbStatus(): Promise<DbStatus> {
   return dbStatus;
 }
 
+export interface SeedUser {
+  id: string;
+  nombre: string;
+  email: string;
+  password: string;
+  role: Role;
+  entityId?: string | null;
+  activo?: boolean;
+}
+
 export async function initDatabase(initialSeed: {
   providers: Provider[];
   clients: Client[];
   catalogConcepts: CatalogConcept[];
   serviceLocations: ServiceLocation[];
   orders: Order[];
+  users?: SeedUser[];
 }): Promise<void> {
   console.log('[DB] Inicializando tablas en PostgreSQL...');
 
@@ -156,6 +184,31 @@ export async function initDatabase(initialSeed: {
     await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS ubicacion_servicio JSONB;');
     await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS solicito_nombre TEXT;');
     await client.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS solicito_telefono TEXT;');
+
+    // 6. Users table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(100) PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(30) NOT NULL,
+        entity_id VARCHAR(100),
+        activo BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    // 7. User sessions table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        token VARCHAR(128) PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
 
     console.log('[DB] Tablas verificadas exitosamente.');
 
@@ -277,6 +330,28 @@ export async function initDatabase(initialSeed: {
             JSON.stringify(ord.manifiestos || []),
             JSON.stringify(ord.manifiestoActual || null),
             JSON.stringify(ord.historial || []),
+          ]
+        );
+      }
+    }
+
+    // Seed users if empty
+    const userCountRes = await client.query('SELECT COUNT(*) FROM users;');
+    if (parseInt(userCountRes.rows[0].count, 10) === 0 && initialSeed.users?.length) {
+      console.log('[DB] Sembrando usuarios iniciales del sistema...');
+      for (const u of initialSeed.users) {
+        await client.query(
+          `INSERT INTO users (id, nombre, email, password_hash, role, entity_id, activo)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (email) DO NOTHING;`,
+          [
+            u.id,
+            u.nombre,
+            u.email.trim().toLowerCase(),
+            hashPassword(u.password),
+            u.role,
+            u.entityId || null,
+            u.activo !== false,
           ]
         );
       }
@@ -811,4 +886,176 @@ export async function dbResetData(seed: {
   } finally {
     client.release();
   }
+}
+
+// --- USERS & SESSIONS REPOSITORY ---
+function mapRowToUser(row: any): AppUser {
+  return {
+    id: row.id,
+    nombre: row.nombre,
+    email: row.email,
+    role: row.role as Role,
+    entityId: row.entity_id || null,
+    entityName: row.entity_name || null,
+    activo: Boolean(row.activo),
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+  };
+}
+
+export async function dbGetUsers(): Promise<AppUser[]> {
+  const res = await pool.query(`
+    SELECT u.*,
+      CASE
+        WHEN u.role = 'PROVIDER' THEN p.nombre
+        WHEN u.role = 'CLIENT' THEN c.nombre
+        ELSE NULL
+      END AS entity_name
+    FROM users u
+    LEFT JOIN providers p ON u.role = 'PROVIDER' AND u.entity_id = p.id
+    LEFT JOIN clients c ON u.role = 'CLIENT' AND u.entity_id = c.id
+    ORDER BY u.created_at ASC, u.nombre ASC;
+  `);
+  return res.rows.map(mapRowToUser);
+}
+
+export async function dbGetUserById(id: string): Promise<AppUser | null> {
+  const res = await pool.query(`
+    SELECT u.*,
+      CASE
+        WHEN u.role = 'PROVIDER' THEN p.nombre
+        WHEN u.role = 'CLIENT' THEN c.nombre
+        ELSE NULL
+      END AS entity_name
+    FROM users u
+    LEFT JOIN providers p ON u.role = 'PROVIDER' AND u.entity_id = p.id
+    LEFT JOIN clients c ON u.role = 'CLIENT' AND u.entity_id = c.id
+    WHERE u.id = $1;
+  `, [id]);
+  if (res.rows.length === 0) return null;
+  return mapRowToUser(res.rows[0]);
+}
+
+export async function dbGetUserByEmailWithPassword(email: string): Promise<(AppUser & { passwordHash: string }) | null> {
+  const res = await pool.query(`
+    SELECT u.*,
+      CASE
+        WHEN u.role = 'PROVIDER' THEN p.nombre
+        WHEN u.role = 'CLIENT' THEN c.nombre
+        ELSE NULL
+      END AS entity_name
+    FROM users u
+    LEFT JOIN providers p ON u.role = 'PROVIDER' AND u.entity_id = p.id
+    LEFT JOIN clients c ON u.role = 'CLIENT' AND u.entity_id = c.id
+    WHERE LOWER(u.email) = LOWER($1);
+  `, [email.trim()]);
+  if (res.rows.length === 0) return null;
+  const row = res.rows[0];
+  return {
+    ...mapRowToUser(row),
+    passwordHash: row.password_hash,
+  };
+}
+
+export async function dbCreateUser(input: {
+  id: string;
+  nombre: string;
+  email: string;
+  password: string;
+  role: Role;
+  entityId?: string | null;
+  activo?: boolean;
+}): Promise<AppUser> {
+  await pool.query(
+    `INSERT INTO users (id, nombre, email, password_hash, role, entity_id, activo)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [
+      input.id,
+      input.nombre.trim(),
+      input.email.trim().toLowerCase(),
+      hashPassword(input.password),
+      input.role,
+      input.entityId || null,
+      input.activo !== false,
+    ]
+  );
+  const created = await dbGetUserById(input.id);
+  return created!;
+}
+
+export async function dbUpdateUser(
+  id: string,
+  updates: {
+    nombre?: string;
+    email?: string;
+    password?: string;
+    role?: Role;
+    entityId?: string | null;
+    activo?: boolean;
+  }
+): Promise<AppUser | null> {
+  const existing = await dbGetUserById(id);
+  if (!existing) return null;
+
+  const nombre = updates.nombre !== undefined ? updates.nombre.trim() : existing.nombre;
+  const email = updates.email !== undefined ? updates.email.trim().toLowerCase() : existing.email;
+  const role = updates.role !== undefined ? updates.role : existing.role;
+  const entityId = updates.entityId !== undefined ? updates.entityId : existing.entityId;
+  const activo = updates.activo !== undefined ? updates.activo : existing.activo;
+
+  if (updates.password && updates.password.trim().length > 0) {
+    await pool.query(
+      `UPDATE users
+       SET nombre = $1, email = $2, password_hash = $3, role = $4, entity_id = $5, activo = $6, updated_at = NOW()
+       WHERE id = $7;`,
+      [nombre, email, hashPassword(updates.password), role, entityId || null, activo, id]
+    );
+  } else {
+    await pool.query(
+      `UPDATE users
+       SET nombre = $1, email = $2, role = $3, entity_id = $4, activo = $5, updated_at = NOW()
+       WHERE id = $6;`,
+      [nombre, email, role, entityId || null, activo, id]
+    );
+  }
+
+  return await dbGetUserById(id);
+}
+
+export async function dbDeleteUser(id: string): Promise<boolean> {
+  const res = await pool.query('DELETE FROM users WHERE id = $1;', [id]);
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function dbCreateSession(userId: string): Promise<string> {
+  const token = crypto.randomBytes(48).toString('hex');
+  await pool.query(
+    `INSERT INTO user_sessions (token, user_id, expires_at)
+     VALUES ($1, $2, NOW() + INTERVAL '7 days');`,
+    [token, userId]
+  );
+  return token;
+}
+
+export async function dbGetSessionUser(token: string): Promise<AppUser | null> {
+  if (!token) return null;
+  const res = await pool.query(`
+    SELECT u.*,
+      CASE
+        WHEN u.role = 'PROVIDER' THEN p.nombre
+        WHEN u.role = 'CLIENT' THEN c.nombre
+        ELSE NULL
+      END AS entity_name
+    FROM user_sessions s
+    JOIN users u ON s.user_id = u.id
+    LEFT JOIN providers p ON u.role = 'PROVIDER' AND u.entity_id = p.id
+    LEFT JOIN clients c ON u.role = 'CLIENT' AND u.entity_id = c.id
+    WHERE s.token = $1 AND s.expires_at > NOW() AND u.activo = true;
+  `, [token]);
+  if (res.rows.length === 0) return null;
+  return mapRowToUser(res.rows[0]);
+}
+
+export async function dbDeleteSession(token: string): Promise<void> {
+  await pool.query('DELETE FROM user_sessions WHERE token = $1;', [token]);
 }
