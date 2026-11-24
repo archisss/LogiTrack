@@ -301,6 +301,7 @@ export default function App() {
               <ClientPortal
                 orders={orders}
                 clients={clients}
+                providers={providers}
                 activeClientId={activeClientId}
                 onSelectClient={(id) => isAdmin && setActiveClientId(id)}
                 onSelectOrder={(order) => setSelectedOrder(order)}

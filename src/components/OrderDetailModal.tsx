@@ -64,6 +64,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [reopenReason, setReopenReason] = useState<string>('');
   const [showReopenBox, setShowReopenBox] = useState<boolean>(false);
   const [viewingDoc, setViewingDoc] = useState<ManifestDocument | null>(null);
+  const [manifestFileName, setManifestFileName] = useState<string>('');
+  const [manifestFileSize, setManifestFileSize] = useState<string>('');
+  const [manifestFileDataUrl, setManifestFileDataUrl] = useState<string | null>(null);
+  const [manifestFileError, setManifestFileError] = useState<string | null>(null);
 
   // Keep form fields synced when a different order is selected or updated
   React.useEffect(() => {
@@ -79,6 +83,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       setReopenReason('');
       setShowReopenBox(false);
       setViewingDoc(null);
+      setManifestFileName('');
+      setManifestFileSize('');
+      setManifestFileDataUrl(null);
+      setManifestFileError(null);
       setFeedback(null);
     }
   }, [
@@ -216,6 +224,68 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       });
       setShowRejectBox(false);
       setRejectionReason('');
+      onOrderUpdated();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleManifestFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setManifestFileError(null);
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(file.name);
+
+    if (!isPdf && !isImage) {
+      setManifestFileError('Solo se admiten archivos en formato PDF o Imagen (JPG, PNG).');
+      e.target.value = '';
+      return;
+    }
+
+    const sizeMb = file.size / (1024 * 1024);
+    const formattedSize = sizeMb >= 1 ? `${sizeMb.toFixed(2)} MB` : `${(file.size / 1024).toFixed(1)} KB`;
+
+    setManifestFileName(file.name);
+    setManifestFileSize(formattedSize);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setManifestFileDataUrl(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleUploadManifestByAdminOrUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manifestFileName.trim() || !manifestFileDataUrl) return;
+
+    setLoading(true);
+    setFeedback(null);
+    try {
+      const res = await apiFetch(`/api/orders/${order.id}/manifest/upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: manifestFileName.trim(),
+          fileSize: manifestFileSize || '1.2 MB',
+          fileDataUrl: manifestFileDataUrl,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al subir manifiesto');
+      setFeedback({
+        type: 'success',
+        message: 'Manifiesto cargado correctamente en estado PENDING para su revisión.',
+      });
+      setManifestFileName('');
+      setManifestFileSize('');
+      setManifestFileDataUrl(null);
+      setManifestFileError(null);
       onOrderUpdated();
     } catch (err: any) {
       setFeedback({ type: 'error', message: err.message });
@@ -966,7 +1036,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 </div>
               )}
 
-              {/* Version History List */}
+              {/* Version History List + Upload option for Admin / User */}
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
                 <div className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center justify-between">
                   <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
@@ -977,6 +1047,89 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     {order.manifiestos.length === 0 ? 'Sin documentos cargados' : `${order.manifiestos.length} versión(es)`}
                   </span>
                 </div>
+
+                {/* Upload Manifest panel for ADMIN and USER */}
+                {canOperate && !isFinalized && (
+                  <form
+                    onSubmit={handleUploadManifestByAdminOrUser}
+                    className="p-4 bg-indigo-50/50 border-b border-slate-200 space-y-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <Upload className="h-3.5 w-3.5 text-indigo-600" />
+                          <span>Subir Nueva Versión de Manifiesto (v{order.manifiestos.length + 1})</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Administración y Usuario pueden adjuntar manifiestos en PDF o Imagen (JPG/PNG).
+                        </p>
+                      </div>
+                      <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-300 bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-bold transition shadow-xs">
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>{manifestFileDataUrl ? 'Cambiar Archivo...' : 'Seleccionar PDF / Imagen...'}</span>
+                        <input
+                          type="file"
+                          accept=".pdf,image/jpeg,image/jpg,image/png,application/pdf"
+                          onChange={handleManifestFileChange}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    {manifestFileError && (
+                      <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 shrink-0" />
+                        <span>{manifestFileError}</span>
+                      </div>
+                    )}
+
+                    {manifestFileDataUrl && (
+                      <div className="bg-white p-3 rounded-xl border border-indigo-200 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 flex-1 min-w-[220px]">
+                          <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 shrink-0">
+                            <FileText className="h-4 w-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <input
+                              type="text"
+                              value={manifestFileName}
+                              onChange={(e) => setManifestFileName(e.target.value)}
+                              placeholder="Nombre descriptivo del manifiesto..."
+                              className="w-full text-xs font-semibold rounded-lg border border-slate-300 px-2.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              required
+                            />
+                            <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">
+                              Archivo listo ({manifestFileSize || 'Listo'})
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManifestFileName('');
+                              setManifestFileSize('');
+                              setManifestFileDataUrl(null);
+                              setManifestFileError(null);
+                            }}
+                            className="px-2.5 py-1.5 text-xs text-slate-600 hover:text-slate-800 border border-slate-300 rounded-xl"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={loading || !manifestFileName.trim()}
+                            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition"
+                          >
+                            <Upload className="h-3.5 w-3.5" />
+                            {loading ? 'Subiendo...' : `Subir Manifiesto v${order.manifiestos.length + 1}`}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </form>
+                )}
 
                 {order.manifiestos.length === 0 ? (
                   <div className="p-8 text-center text-slate-400 text-xs">

@@ -96,9 +96,11 @@ export interface ProviderAddress {
 }
 
 export interface ProviderAuthorizationDoc {
+  id?: string;
   fileName: string;
   fileType?: string; // pdf | image
   fileDataUrl?: string;
+  descripcion?: string; // Campo opcional para describir la autorización
   uploadedAt: string;
 }
 
@@ -111,6 +113,7 @@ export interface Provider {
   email: string;
   direccion?: ProviderAddress;
   autorizacionDocumento?: ProviderAuthorizationDoc;
+  autorizacionesDocumentos?: ProviderAuthorizationDoc[];
 }
 
 export interface Client {

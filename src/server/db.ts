@@ -97,10 +97,14 @@ export async function initDatabase(initialSeed: {
         email VARCHAR(255) DEFAULT '',
         direccion JSONB,
         autorizacion_documento JSONB,
+        autorizaciones_documentos JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+    await client.query(
+      "ALTER TABLE providers ADD COLUMN IF NOT EXISTS autorizaciones_documentos JSONB NOT NULL DEFAULT '[]'::jsonb;"
+    );
 
     // 2. Clients table
     await client.query(`
@@ -217,9 +221,14 @@ export async function initDatabase(initialSeed: {
     if (parseInt(provCountRes.rows[0].count, 10) === 0) {
       console.log('[DB] Sembrando transportistas iniciales...');
       for (const p of initialSeed.providers) {
+        const docs = p.autorizacionesDocumentos?.length
+          ? p.autorizacionesDocumentos
+          : p.autorizacionDocumento
+          ? [p.autorizacionDocumento]
+          : [];
         await client.query(
-          `INSERT INTO providers (id, nombre, rfc, activo, telefono, email, direccion, autorizacion_documento)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          `INSERT INTO providers (id, nombre, rfc, activo, telefono, email, direccion, autorizacion_documento, autorizaciones_documentos)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            ON CONFLICT (id) DO NOTHING;`,
           [
             p.id,
@@ -229,7 +238,8 @@ export async function initDatabase(initialSeed: {
             p.telefono || '',
             p.email || '',
             JSON.stringify(p.direccion || null),
-            JSON.stringify(p.autorizacionDocumento || null),
+            JSON.stringify(docs[0] || null),
+            JSON.stringify(docs),
           ]
         );
       }
@@ -365,6 +375,18 @@ export async function initDatabase(initialSeed: {
 
 // Map database row to Provider object
 function mapRowToProvider(row: any): Provider {
+  const rawDocs = row.autorizaciones_documentos
+    ? typeof row.autorizaciones_documentos === 'string'
+      ? JSON.parse(row.autorizaciones_documentos)
+      : row.autorizaciones_documentos
+    : [];
+  const legacyDoc = row.autorizacion_documento
+    ? typeof row.autorizacion_documento === 'string'
+      ? JSON.parse(row.autorizacion_documento)
+      : row.autorizacion_documento
+    : undefined;
+  const docs = Array.isArray(rawDocs) && rawDocs.length > 0 ? rawDocs : legacyDoc ? [legacyDoc] : [];
+
   return {
     id: row.id,
     nombre: row.nombre,
@@ -373,7 +395,8 @@ function mapRowToProvider(row: any): Provider {
     telefono: row.telefono || '',
     email: row.email || '',
     direccion: row.direccion || undefined,
-    autorizacionDocumento: row.autorizacion_documento || undefined,
+    autorizacionDocumento: docs[0] || undefined,
+    autorizacionesDocumentos: docs,
   };
 }
 
@@ -471,39 +494,59 @@ export async function dbGetProviderById(id: string): Promise<Provider | null> {
 }
 
 export async function dbCreateProvider(provider: Provider): Promise<Provider> {
+  const docs = provider.autorizacionesDocumentos?.length
+    ? provider.autorizacionesDocumentos
+    : provider.autorizacionDocumento
+    ? [provider.autorizacionDocumento]
+    : [];
+  const normalized: Provider = {
+    ...provider,
+    autorizacionDocumento: docs[0] || undefined,
+    autorizacionesDocumentos: docs,
+  };
+
   await pool.query(
-    `INSERT INTO providers (id, nombre, rfc, activo, telefono, email, direccion, autorizacion_documento)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`,
+    `INSERT INTO providers (id, nombre, rfc, activo, telefono, email, direccion, autorizacion_documento, autorizaciones_documentos)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
     [
-      provider.id,
-      provider.nombre,
-      provider.rfc,
-      provider.activo,
-      provider.telefono || '',
-      provider.email || '',
-      JSON.stringify(provider.direccion || null),
-      JSON.stringify(provider.autorizacionDocumento || null),
+      normalized.id,
+      normalized.nombre,
+      normalized.rfc,
+      normalized.activo,
+      normalized.telefono || '',
+      normalized.email || '',
+      JSON.stringify(normalized.direccion || null),
+      JSON.stringify(normalized.autorizacionDocumento || null),
+      JSON.stringify(docs),
     ]
   );
-  return provider;
+  return normalized;
 }
 
 export async function dbUpdateProvider(id: string, updates: Partial<Provider>): Promise<Provider | null> {
   const existing = await dbGetProviderById(id);
   if (!existing) return null;
 
+  let nextDocs = existing.autorizacionesDocumentos || (existing.autorizacionDocumento ? [existing.autorizacionDocumento] : []);
+  if (updates.autorizacionesDocumentos !== undefined) {
+    nextDocs = updates.autorizacionesDocumentos;
+  } else if (updates.autorizacionDocumento !== undefined) {
+    nextDocs = updates.autorizacionDocumento ? [updates.autorizacionDocumento] : [];
+  }
+
   const merged: Provider = {
     ...existing,
     ...updates,
     direccion: updates.direccion !== undefined ? updates.direccion : existing.direccion,
-    autorizacionDocumento: updates.autorizacionDocumento !== undefined ? updates.autorizacionDocumento : existing.autorizacionDocumento,
+    autorizacionDocumento: nextDocs[0] || undefined,
+    autorizacionesDocumentos: nextDocs,
   };
 
   await pool.query(
     `UPDATE providers
      SET nombre = $1, rfc = $2, activo = $3, telefono = $4, email = $5,
-         direccion = $6, autorizacion_documento = $7, updated_at = NOW()
-     WHERE id = $8;`,
+         direccion = $6, autorizacion_documento = $7, autorizaciones_documentos = $8, updated_at = NOW()
+     WHERE id = $9;`,
     [
       merged.nombre,
       merged.rfc,
@@ -512,6 +555,7 @@ export async function dbUpdateProvider(id: string, updates: Partial<Provider>): 
       merged.email || '',
       JSON.stringify(merged.direccion || null),
       JSON.stringify(merged.autorizacionDocumento || null),
+      JSON.stringify(nextDocs),
       id,
     ]
   );
@@ -791,10 +835,25 @@ export async function dbResetData(seed: {
     await client.query('DELETE FROM providers;');
 
     for (const p of seed.providers) {
+      const docs = p.autorizacionesDocumentos?.length
+        ? p.autorizacionesDocumentos
+        : p.autorizacionDocumento
+        ? [p.autorizacionDocumento]
+        : [];
       await client.query(
-        `INSERT INTO providers (id, nombre, rfc, activo, telefono, email, direccion, autorizacion_documento)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`,
-        [p.id, p.nombre, p.rfc, p.activo, p.telefono || '', p.email || '', JSON.stringify(p.direccion || null), JSON.stringify(p.autorizacionDocumento || null)]
+        `INSERT INTO providers (id, nombre, rfc, activo, telefono, email, direccion, autorizacion_documento, autorizaciones_documentos)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
+        [
+          p.id,
+          p.nombre,
+          p.rfc,
+          p.activo,
+          p.telefono || '',
+          p.email || '',
+          JSON.stringify(p.direccion || null),
+          JSON.stringify(docs[0] || null),
+          JSON.stringify(docs),
+        ]
       );
     }
 

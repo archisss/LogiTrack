@@ -929,7 +929,7 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
-  app.use(express.json({ limit: '15mb' }));
+  app.use(express.json({ limit: '25mb' }));
 
   // Initialize PostgreSQL database with initial tables and benchmark seeds
   try {
@@ -1206,7 +1206,16 @@ async function startServer() {
     if (authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
       return res.status(403).json({ error: 'No tiene permisos para registrar transportistas' });
     }
-    const { nombre, rfc, telefono, email, activo, direccion, autorizacionDocumento } = req.body;
+    const {
+      nombre,
+      rfc,
+      telefono,
+      email,
+      activo,
+      direccion,
+      autorizacionDocumento,
+      autorizacionesDocumentos,
+    } = req.body;
     if (!nombre || String(nombre).trim().length === 0) {
       return res.status(400).json({ error: 'El nombre o razón social del transportista es obligatorio' });
     }
@@ -1225,6 +1234,22 @@ async function startServer() {
         });
       }
 
+      const rawDocs = Array.isArray(autorizacionesDocumentos)
+        ? autorizacionesDocumentos
+        : autorizacionDocumento
+        ? [autorizacionDocumento]
+        : [];
+      const cleanDocs = rawDocs
+        .filter((d: any) => d && d.fileName)
+        .map((d: any, idx: number) => ({
+          id: d.id ? String(d.id) : `auth-${Date.now()}-${idx}`,
+          fileName: String(d.fileName || 'autorizacion.pdf').trim(),
+          fileType: d.fileType || 'application/pdf',
+          fileDataUrl: d.fileDataUrl,
+          descripcion: d.descripcion && String(d.descripcion).trim() ? String(d.descripcion).trim() : undefined,
+          uploadedAt: d.uploadedAt || new Date().toISOString(),
+        }));
+
       const newProvider: Provider = {
         id: `prov-${Date.now()}`,
         nombre: String(nombre).trim(),
@@ -1241,14 +1266,8 @@ async function startServer() {
               codigoPostal: String(direccion.codigoPostal || '').trim(),
             }
           : undefined,
-        autorizacionDocumento: autorizacionDocumento
-          ? {
-              fileName: String(autorizacionDocumento.fileName || 'autorizacion.pdf'),
-              fileType: autorizacionDocumento.fileType || 'application/pdf',
-              fileDataUrl: autorizacionDocumento.fileDataUrl,
-              uploadedAt: autorizacionDocumento.uploadedAt || new Date().toISOString(),
-            }
-          : undefined,
+        autorizacionDocumento: cleanDocs[0] || undefined,
+        autorizacionesDocumentos: cleanDocs,
       };
 
       const created = await dbCreateProvider(newProvider);
@@ -1270,7 +1289,16 @@ async function startServer() {
         return res.status(404).json({ error: 'Transportista no encontrado' });
       }
 
-      const { nombre, rfc, telefono, email, activo, direccion, autorizacionDocumento } = req.body;
+      const {
+        nombre,
+        rfc,
+        telefono,
+        email,
+        activo,
+        direccion,
+        autorizacionDocumento,
+        autorizacionesDocumentos,
+      } = req.body;
 
       // Regla 4: No puede haber 2 proveedores con el mismo RFC
       if (rfc !== undefined) {
@@ -1300,8 +1328,40 @@ async function startServer() {
           codigoPostal: String(direccion.codigoPostal || '').trim(),
         };
       }
-      if (autorizacionDocumento !== undefined) {
-        provider.autorizacionDocumento = autorizacionDocumento;
+      if (autorizacionesDocumentos !== undefined) {
+        const cleanDocs = Array.isArray(autorizacionesDocumentos)
+          ? autorizacionesDocumentos
+              .filter((d: any) => d && d.fileName)
+              .map((d: any, idx: number) => ({
+                id: d.id ? String(d.id) : `auth-${Date.now()}-${idx}`,
+                fileName: String(d.fileName || 'autorizacion.pdf').trim(),
+                fileType: d.fileType || 'application/pdf',
+                fileDataUrl: d.fileDataUrl,
+                descripcion: d.descripcion && String(d.descripcion).trim() ? String(d.descripcion).trim() : undefined,
+                uploadedAt: d.uploadedAt || new Date().toISOString(),
+              }))
+          : [];
+        provider.autorizacionesDocumentos = cleanDocs;
+        provider.autorizacionDocumento = cleanDocs[0] || undefined;
+      } else if (autorizacionDocumento !== undefined) {
+        if (autorizacionDocumento && autorizacionDocumento.fileName) {
+          const singleDoc = {
+            id: autorizacionDocumento.id ? String(autorizacionDocumento.id) : `auth-${Date.now()}-0`,
+            fileName: String(autorizacionDocumento.fileName).trim(),
+            fileType: autorizacionDocumento.fileType || 'application/pdf',
+            fileDataUrl: autorizacionDocumento.fileDataUrl,
+            descripcion:
+              autorizacionDocumento.descripcion && String(autorizacionDocumento.descripcion).trim()
+                ? String(autorizacionDocumento.descripcion).trim()
+                : undefined,
+            uploadedAt: autorizacionDocumento.uploadedAt || new Date().toISOString(),
+          };
+          provider.autorizacionesDocumentos = [singleDoc];
+          provider.autorizacionDocumento = singleDoc;
+        } else {
+          provider.autorizacionesDocumentos = [];
+          provider.autorizacionDocumento = undefined;
+        }
       }
 
       const updated = await dbUpdateProvider(req.params.id, provider);
@@ -2019,13 +2079,13 @@ async function startServer() {
     }
   });
 
-  // Upload Manifest (Provider or Admin preview)
+  // Upload Manifest (Provider, Admin, or Operational User)
   app.post('/api/orders/:id/manifest/upload', async (req: Request, res: Response) => {
     try {
       const authUser = await getAuthUser(req);
       if (!authUser) return res.status(401).json({ error: 'Autenticación requerida' });
-      if (authUser.role !== 'PROVIDER' && authUser.role !== 'ADMIN') {
-        return res.status(403).json({ error: 'Solo el proveedor asignado puede subir el manifiesto' });
+      if (authUser.role !== 'PROVIDER' && authUser.role !== 'ADMIN' && authUser.role !== 'USER') {
+        return res.status(403).json({ error: 'No tiene permisos para subir manifiestos en esta orden' });
       }
 
       const order = await dbGetOrderById(req.params.id);
@@ -2033,10 +2093,13 @@ async function startServer() {
         return res.status(404).json({ error: 'Orden no encontrada' });
       }
 
-      const { fileName, fileSize, fileDataUrl } = req.body;
-      const targetProviderId = authUser.role === 'PROVIDER' ? authUser.entityId : req.body.providerId;
+      const { fileName, fileSize, fileDataUrl, providerId } = req.body;
+      const targetProviderId = authUser.role === 'PROVIDER' ? authUser.entityId : providerId;
 
-      if (targetProviderId && order.proveedorId !== targetProviderId) {
+      if (authUser.role === 'PROVIDER' && (!targetProviderId || order.proveedorId !== targetProviderId)) {
+        return res.status(403).json({ error: 'Solo el proveedor asignado puede subir el manifiesto de esta orden' });
+      }
+      if (authUser.role === 'ADMIN' && providerId && order.proveedorId !== providerId) {
         return res.status(403).json({ error: 'Solo el proveedor asignado puede subir el manifiesto de esta orden' });
       }
 
@@ -2056,7 +2119,7 @@ async function startServer() {
         fileName: String(fileName).trim(),
         fileSize: fileSize || '1.2 MB',
         fileDataUrl: fileDataUrl || `data:application/pdf;base64,JVBERi0xLjQK...[mock-secure-doc-v${nextVersion}]`,
-        uploadedBy: authUser.email || order.proveedorNombre || 'Proveedor',
+        uploadedBy: authUser.email || authUser.nombre || order.proveedorNombre || 'Usuario',
         uploadedAt: nowIso,
         status: 'PENDING',
         isCurrent: true,
@@ -2069,13 +2132,15 @@ async function startServer() {
       addHistory(order, {
         action: 'CARGA_MANIFIESTO',
         user: authUser.email,
-        role: 'PROVIDER',
-        comment: `Manifiesto versión ${nextVersion} ('${newManifest.fileName}') subido. Estado: PENDING (pendiente de revisión).`,
+        role: authUser.role,
+        comment: `Manifiesto versión ${nextVersion} ('${newManifest.fileName}') subido por ${authUser.nombre} (${authUser.role}). Estado: PENDING (pendiente de revisión).`,
         details: { version: nextVersion, fileName: newManifest.fileName, status: 'PENDING' },
       });
 
       const updated = await dbUpdateOrder(order);
-      res.json(sanitizeOrderByRole(updated, authUser.role === 'ADMIN' ? 'PROVIDER' : authUser.role, targetProviderId || undefined));
+      const returnRole: Role =
+        authUser.role === 'ADMIN' && providerId ? 'PROVIDER' : authUser.role;
+      res.json(sanitizeOrderByRole(updated, returnRole, targetProviderId || undefined));
     } catch (err: any) {
       res.status(500).json({ error: 'Error al subir manifiesto', details: err.message });
     }

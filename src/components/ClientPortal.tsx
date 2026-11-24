@@ -6,14 +6,17 @@ import {
   Clock,
   ShieldCheck,
   Search,
+  ExternalLink,
+  FileCheck,
 } from 'lucide-react';
-import type { Order, Client, ManifestDocument } from '../types.ts';
+import type { Order, Client, Provider, ManifestDocument } from '../types.ts';
 import { calculateSla } from '../domain/rules.ts';
 import { StatusBadge, SlaBadge } from './StatusBadge.tsx';
 
 interface ClientPortalProps {
   orders: Order[];
   clients: Client[];
+  providers: Provider[];
   activeClientId: string;
   onSelectClient: (clientId: string) => void;
   onSelectOrder: (order: Order) => void;
@@ -23,6 +26,7 @@ interface ClientPortalProps {
 export const ClientPortal: React.FC<ClientPortalProps> = ({
   orders,
   clients,
+  providers,
   activeClientId,
   onSelectClient,
   onSelectOrder,
@@ -52,14 +56,42 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     });
   }, [clientOrders, searchTerm, statusFilter]);
 
-  const handleDownloadManifest = (order: Order, manifest: ManifestDocument) => {
-    if (manifest.fileDataUrl && !manifest.fileDataUrl.includes('[mock-secure-doc')) {
+  const openDocumentInNewTab = (fileDataUrl: string, fileName: string, mimeHint?: string) => {
+    try {
+      const parts = fileDataUrl.split(',');
+      const mime =
+        parts[0].match(/:(.*?);/)?.[1] ||
+        mimeHint ||
+        (fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+      const binaryStr = atob(parts[1]);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: mime });
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = manifest.fileDataUrl;
-      link.download = manifest.fileName;
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      const link = document.createElement('a');
+      link.href = fileDataUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  const handleOpenManifest = (order: Order, manifest: ManifestDocument) => {
+    if (manifest.fileDataUrl && !manifest.fileDataUrl.includes('[mock-secure-doc')) {
+      openDocumentInNewTab(manifest.fileDataUrl, manifest.fileName);
       return;
     }
     onSelectOrder(order);
@@ -86,7 +118,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Listado compacto de recolecciones, importes autorizados y consulta de manifiestos certificados
+              Listado compacto de recolecciones, importes autorizados y consulta de manifiestos y autorizaciones
             </p>
           </div>
         </div>
@@ -115,7 +147,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         <div className="flex items-center gap-2.5">
           <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
           <span>
-            <strong>Transparencia y Protección de Datos:</strong> Visualiza los importes autorizados y manifiestos formalmente aprobados. Los costos operativos internos y márgenes comerciales están protegidos.
+            <strong>Transparencia y Protección de Datos:</strong> Visualiza los importes autorizados, autorizaciones del transportista y manifiestos formalmente aprobados. Los costos operativos internos y márgenes comerciales están protegidos.
           </span>
         </div>
         <span className="text-[11px] text-slate-400 font-mono">RFC: {activeClient?.rfc}</span>
@@ -158,7 +190,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <th className="py-3 px-4">Número de Pedido</th>
                 <th className="py-3 px-4">Estado Operativo</th>
                 <th className="py-3 px-4">Antigüedad</th>
-                <th className="py-3 px-4">Manifiesto Oficial</th>
+                <th className="py-3 px-4">Manifiesto</th>
+                <th className="py-3 px-4">Autorización</th>
                 <th className="py-3 px-4">Nº Recepción</th>
                 <th className="py-3 px-4">Nº Factura</th>
                 <th className="py-3 px-4 text-right">Total Cobrado</th>
@@ -168,7 +201,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-slate-400">
+                  <td colSpan={9} className="py-10 text-center text-slate-400">
                     No se encontraron órdenes registradas para esta empresa cliente.
                   </td>
                 </tr>
@@ -176,6 +209,16 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 filteredOrders.map((o) => {
                   const sla = calculateSla(o);
                   const approvedManifest = o.manifiestos.find((m) => m.status === 'APPROVED');
+                  const assignedProvider = o.proveedorId
+                    ? providers.find((p) => p.id === o.proveedorId)
+                    : undefined;
+                  const authDocs = assignedProvider
+                    ? assignedProvider.autorizacionesDocumentos?.length
+                      ? assignedProvider.autorizacionesDocumentos
+                      : assignedProvider.autorizacionDocumento
+                      ? [assignedProvider.autorizacionDocumento]
+                      : []
+                    : [];
 
                   return (
                     <tr
@@ -200,16 +243,69 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         <SlaBadge days={sla.days} color={sla.color} label={sla.label} isFinalized={sla.isFinalized} />
                       </td>
 
-                      <td className="py-3 px-4">
+                      {/* Columna Manifiesto */}
+                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                         {approvedManifest ? (
-                          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold">
-                            <CheckCircle className="h-3 w-3 text-emerald-600" />
-                            <span>Certificado (v{approvedManifest.version})</span>
+                          <div className="space-y-1">
+                            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-semibold">
+                              <CheckCircle className="h-3 w-3 text-emerald-600" />
+                              <span>Certificado (v{approvedManifest.version})</span>
+                            </div>
+                            <div>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenManifest(o, approvedManifest)}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 underline"
+                                title="Abrir manifiesto (PDF o Imagen)"
+                              >
+                                <ExternalLink className="h-3 w-3 shrink-0" />
+                                <span>Abrir Manifiesto</span>
+                              </button>
+                            </div>
                           </div>
                         ) : (
                           <div className="text-[11px] text-slate-400 italic flex items-center gap-1">
                             <Clock className="h-3 w-3" />
                             <span>En trámite</span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Columna Autorización */}
+                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                        {authDocs.length > 0 ? (
+                          <div className="space-y-1">
+                            {authDocs.map((doc, idx) => (
+                              <div key={doc.id || `${doc.fileName}-${idx}`}>
+                                {doc.fileDataUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openDocumentInNewTab(doc.fileDataUrl!, doc.fileName, doc.fileType)}
+                                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 underline text-left"
+                                    title={doc.descripcion || doc.fileName}
+                                  >
+                                    <ExternalLink className="h-3 w-3 shrink-0" />
+                                    <span className="truncate max-w-[160px]">
+                                      {doc.descripcion || doc.fileName}
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[11px] text-slate-600"
+                                    title={doc.descripcion || doc.fileName}
+                                  >
+                                    <FileCheck className="h-3 w-3 text-slate-400 shrink-0" />
+                                    <span className="truncate max-w-[160px]">
+                                      {doc.descripcion || doc.fileName}
+                                    </span>
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-400 italic">
+                            Sin autorización
                           </div>
                         )}
                       </td>
@@ -237,12 +333,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                           {approvedManifest && (
                             <button
-                              onClick={() => handleDownloadManifest(o, approvedManifest)}
+                              onClick={() => handleOpenManifest(o, approvedManifest)}
                               className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
-                              title="Descargar o ver manifiesto certificado"
+                              title="Abrir o descargar manifiesto certificado"
                             >
                               <Download className="h-3 w-3" />
-                              PDF
+                              Ver
                             </button>
                           )}
                         </div>

@@ -54,8 +54,9 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
   const [estado, setEstado] = useState('');
   const [codigoPostal, setCodigoPostal] = useState('');
 
-  // Authorization Document (Requerimiento 2)
-  const [authDoc, setAuthDoc] = useState<ProviderAuthorizationDoc | null>(null);
+  // Authorization Documents (Requerimiento 2 - múltiples archivos con descripción opcional)
+  const [authDocs, setAuthDocs] = useState<ProviderAuthorizationDoc[]>([]);
+  const [pendingDocDesc, setPendingDocDesc] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -128,7 +129,8 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
     setCiudad('');
     setEstado('');
     setCodigoPostal('');
-    setAuthDoc(null);
+    setAuthDocs([]);
+    setPendingDocDesc('');
     setFeedback(null);
   };
 
@@ -159,35 +161,84 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
       setCodigoPostal('');
     }
 
-    setAuthDoc(prov.autorizacionDocumento || null);
+    const existingDocs = prov.autorizacionesDocumentos?.length
+      ? prov.autorizacionesDocumentos
+      : prov.autorizacionDocumento
+      ? [prov.autorizacionDocumento]
+      : [];
+    setAuthDocs(existingDocs);
+    setPendingDocDesc('');
     setIsEditing(true);
     setFeedback(null);
   };
 
-  // Handle file upload for authorization
+  // Handle single or multiple file uploads for authorization
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
-    const isPdf = file.type === 'application/pdf' || file.name.endsWith('.pdf');
-    const isImage = file.type.startsWith('image/');
+    const descSnapshot = pendingDocDesc.trim();
+    const invalidFiles = files.filter(
+      (f) => f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf') && !f.type.startsWith('image/')
+    );
 
-    if (!isPdf && !isImage) {
-      setFeedback({ type: 'error', message: 'El archivo de autorización debe ser un PDF o una imagen (JPG/PNG).' });
+    if (invalidFiles.length > 0) {
+      setFeedback({
+        type: 'error',
+        message: 'Todos los archivos de autorización deben ser PDF o imagen (JPG/PNG).',
+      });
+      e.target.value = '';
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setAuthDoc({
-        fileName: file.name,
-        fileType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'),
-        fileDataUrl: reader.result as string,
-        uploadedAt: new Date().toISOString(),
+    Promise.all(
+      files.map(
+        (file, idx) =>
+          new Promise<ProviderAuthorizationDoc>((resolve, reject) => {
+            const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+            const reader = new FileReader();
+            reader.onload = () => {
+              resolve({
+                id: `auth-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+                fileName: file.name,
+                fileType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'),
+                fileDataUrl: reader.result as string,
+                descripcion: descSnapshot || undefined,
+                uploadedAt: new Date().toISOString(),
+              });
+            };
+            reader.onerror = () => reject(new Error(`No se pudo leer el archivo ${file.name}`));
+            reader.readAsDataURL(file);
+          })
+      )
+    )
+      .then((newDocs) => {
+        setAuthDocs((prev) => [...prev, ...newDocs]);
+        setPendingDocDesc('');
+        setFeedback({
+          type: 'success',
+          message:
+            newDocs.length === 1
+              ? `Archivo "${newDocs[0].fileName}" agregado exitosamente.`
+              : `${newDocs.length} archivos de autorización agregados exitosamente.`,
+        });
+      })
+      .catch((err) => {
+        setFeedback({ type: 'error', message: err.message || 'Error al cargar los archivos.' });
+      })
+      .finally(() => {
+        e.target.value = '';
       });
-      setFeedback({ type: 'success', message: `Archivo "${file.name}" cargado exitosamente.` });
-    };
-    reader.readAsDataURL(file);
+  };
+
+  const handleUpdateDocDescription = (index: number, value: string) => {
+    setAuthDocs((prev) =>
+      prev.map((doc, i) => (i === index ? { ...doc, descripcion: value } : doc))
+    );
+  };
+
+  const handleRemoveAuthDoc = (index: number) => {
+    setAuthDocs((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -224,6 +275,11 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
       codigoPostal: codigoPostal.trim(),
     };
 
+    const cleanedDocs = authDocs.map((doc) => ({
+      ...doc,
+      descripcion: doc.descripcion?.trim() ? doc.descripcion.trim() : undefined,
+    }));
+
     const payload = {
       nombre: nombre.trim(),
       rfc: normalizedRfc,
@@ -231,7 +287,8 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
       email: email.trim(),
       activo,
       direccion: calleNumero.trim() ? direccion : undefined,
-      autorizacionDocumento: authDoc || undefined,
+      autorizacionesDocumentos: cleanedDocs,
+      autorizacionDocumento: cleanedDocs[0] || null,
     };
 
     try {
@@ -515,59 +572,114 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
                 </div>
               </div>
 
-              {/* Sección de Autorización Documental (Requerimiento 2) */}
-              <div className="border-t border-slate-200 pt-3 space-y-2">
-                <div className="flex items-center justify-between">
+              {/* Sección de Autorización Documental (Múltiples archivos + descripción opcional) */}
+              <div className="border-t border-slate-200 pt-3 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 uppercase tracking-wider">
                     <FileCheck className="h-4 w-4 text-indigo-600" />
-                    <span>Archivo de Autorización Oficial (PDF o Imagen)</span>
+                    <span>Archivos de Autorización Oficial (PDF o Imagen)</span>
+                    {authDocs.length > 0 && (
+                      <span className="ml-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-bold">
+                        {authDocs.length}
+                      </span>
+                    )}
                   </div>
                   <span className="text-[11px] text-slate-400">
-                    Permiso SEMARNAT, SCT, Registro Ambiental
+                    Permiso SEMARNAT, SCT, Registro Ambiental (puede subir varios)
                   </span>
                 </div>
 
-                <div className="bg-white p-3.5 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
-                  {authDoc ? (
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
-                        {authDoc.fileType?.includes('pdf') ? (
-                          <FileText className="h-5 w-5" />
-                        ) : (
-                          <ImageIcon className="h-5 w-5" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="font-bold text-slate-900">{authDoc.fileName}</div>
-                        <div className="text-[10px] text-slate-400">
-                          Adjuntado el {new Date(authDoc.uploadedAt).toLocaleString('es-MX')}
+                {/* Uploader row with optional description */}
+                <div className="bg-white p-3.5 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-3 items-end text-xs">
+                  <div className="md:col-span-8">
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Descripción del archivo (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej. Autorización SEMARNAT RP-2026 / Permiso SCT vigente..."
+                      value={pendingDocDesc}
+                      onChange={(e) => setPendingDocDesc(e.target.value)}
+                      className="w-full text-xs rounded-xl border border-slate-300 px-3 py-1.5 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="md:col-span-4 flex justify-end">
+                    <label className="w-full md:w-auto cursor-pointer inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-bold transition">
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>{authDocs.length > 0 ? 'Agregar Otro Archivo...' : 'Subir Autorización (PDF / Imagen)...'}</span>
+                      <input
+                        type="file"
+                        multiple
+                        accept=".pdf, image/*"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Attached documents list */}
+                {authDocs.length === 0 ? (
+                  <div className="bg-white p-3 rounded-xl border border-dashed border-slate-300 text-slate-500 text-xs italic text-center">
+                    No se han adjuntado documentos de autorización aún.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {authDocs.map((doc, idx) => (
+                      <div
+                        key={doc.id || `${doc.fileName}-${idx}`}
+                        className="bg-white p-3 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-start gap-2.5 flex-1 min-w-[240px]">
+                          <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 shrink-0">
+                            {doc.fileType?.includes('pdf') || doc.fileName.toLowerCase().endsWith('.pdf') ? (
+                              <FileText className="h-4 w-4" />
+                            ) : (
+                              <ImageIcon className="h-4 w-4" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-bold text-slate-900 truncate max-w-[260px]">
+                                {doc.fileName}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {new Date(doc.uploadedAt).toLocaleString('es-MX')}
+                              </span>
+                            </div>
+                            <input
+                              type="text"
+                              placeholder="Descripción (opcional)..."
+                              value={doc.descripcion || ''}
+                              onChange={(e) => handleUpdateDocDescription(idx, e.target.value)}
+                              className="w-full text-[11px] rounded-lg border border-slate-200 px-2.5 py-1 bg-slate-50/70 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {doc.fileDataUrl && (
+                            <button
+                              type="button"
+                              onClick={() => openDocumentInNewTab(doc)}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-[11px] transition"
+                            >
+                              Ver
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAuthDoc(idx)}
+                            className="px-2.5 py-1 rounded-lg text-red-600 hover:bg-red-50 font-semibold text-[11px] transition"
+                          >
+                            Quitar
+                          </button>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setAuthDoc(null)}
-                        className="text-xs text-red-600 hover:text-red-800 font-semibold underline ml-2"
-                      >
-                        Quitar archivo
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="text-slate-500 text-xs italic">
-                      No se ha adjuntado documento de autorización aún.
-                    </div>
-                  )}
-
-                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-bold transition">
-                    <Upload className="h-3.5 w-3.5" />
-                    <span>{authDoc ? 'Cambiar Archivo...' : 'Subir Autorización (PDF / Imagen)...'}</span>
-                    <input
-                      type="file"
-                      accept=".pdf, image/*"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Botones de acción */}
@@ -725,27 +837,47 @@ export const ProviderCrudModal: React.FC<ProviderCrudModalProps> = ({
                       </td>
 
                       <td className="py-3 px-4">
-                        {p.autorizacionDocumento ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                              <FileCheck className="h-3 w-3 text-indigo-600" />
-                              {p.autorizacionDocumento.fileName}
-                            </span>
-                            <button
-                              onClick={() => {
-                                if (p.autorizacionDocumento) {
-                                  openDocumentInNewTab(p.autorizacionDocumento);
-                                }
-                              }}
-                              className="text-[10px] text-indigo-600 hover:text-indigo-800 underline font-medium"
-                              title="Abrir autorización en una nueva pestaña"
-                            >
-                              Ver
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-slate-400 italic">Pendiente de subir</span>
-                        )}
+                        {(() => {
+                          const docs = p.autorizacionesDocumentos?.length
+                            ? p.autorizacionesDocumentos
+                            : p.autorizacionDocumento
+                            ? [p.autorizacionDocumento]
+                            : [];
+                          if (docs.length === 0) {
+                            return <span className="text-[11px] text-slate-400 italic">Pendiente de subir</span>;
+                          }
+                          return (
+                            <div className="space-y-1.5">
+                              {docs.map((doc, idx) => (
+                                <div key={doc.id || `${doc.fileName}-${idx}`} className="flex items-start gap-1.5">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 max-w-[180px] truncate">
+                                        <FileCheck className="h-3 w-3 text-indigo-600 shrink-0" />
+                                        <span className="truncate">{doc.fileName}</span>
+                                      </span>
+                                      {doc.fileDataUrl && (
+                                        <button
+                                          type="button"
+                                          onClick={() => openDocumentInNewTab(doc)}
+                                          className="text-[10px] text-indigo-600 hover:text-indigo-800 underline font-semibold shrink-0"
+                                          title="Abrir autorización en una nueva pestaña"
+                                        >
+                                          Ver
+                                        </button>
+                                      )}
+                                    </div>
+                                    {doc.descripcion && (
+                                      <div className="text-[10px] text-slate-500 pl-1 mt-0.5 max-w-[220px] truncate" title={doc.descripcion}>
+                                        {doc.descripcion}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       <td className="py-3 px-4 text-center">
